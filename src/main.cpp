@@ -276,14 +276,14 @@ static void disparar(const char* motivo, const char* codigo) {
   }
 }
 
-// Soma/subtrai 1 segundo do tempo da esteira rodando (botoes B/C na tela de Ajustes)
+// Soma/subtrai 1 minuto do tempo da esteira rodando (botoes B/C na tela de Ajustes)
 static void mudaTempo(int delta) {
   long novo = (long)esteiraSegMs + delta;
-  if (novo < 1000 || novo > 600000) return;  // 1 a 600 segundos
+  if (novo < 60000L || novo > 3600000L * 10) return;  // 1 min a 10 h
   esteiraSegMs = (uint32_t)novo;
   prefs.putUInt("etempo", esteiraSegMs);
   tSalvo = millis();
-  logf("Tempo da esteira: %u s", (unsigned)esteiraSegMs / 1000);
+  logf("Tempo da esteira: %u min", (unsigned)esteiraSegMs / 60000);
 }
 
 // Abre o rele e cancela qualquer ciclo em andamento (botao C e botao da web).
@@ -321,7 +321,8 @@ void setup() {
   if (tmp.fromString(prefs.getString("pip", ""))) ipImpressora = tmp;
   if (tmp.fromString(prefs.getString("ip", ""))) ipLocal = tmp;
   if (tmp.fromString(prefs.getString("gw", ""))) ipGw = tmp;
-  esteiraSegMs = prefs.getUInt("etempo", 10000);
+  esteiraSegMs = prefs.getUInt("etempo", 600000);  // padrao: 10 minutos
+  if (esteiraSegMs < 60000) esteiraSegMs = 600000;  // migra valores antigos em segundos
   esteiraEntrada = prefs.getInt("eent", ESTEIRA_ENTRADA);
   esteiraAlto = prefs.getBool("ealto", ESTEIRA_ATIVO_ALTO);
   Ethernet.begin(mac, ipLocal, ipGw, ipGw, ipMask);
@@ -346,10 +347,23 @@ void loop() {
   static unsigned long tBotao = 0;
   bool botao = false;
   if (M5StamPLC.BtnA().wasPressed()) { pagina = (pagina + 1) % N_PAG; botao = true; }
+  // B segurado por 1 s na tela ESTADOS (pagina 2) alterna origem da esteira (rele <-> IN1)
+  if (pagina == 2 && M5StamPLC.BtnB().pressedFor(1000)) {
+    static unsigned long tAltera = 0;
+    if (millis() - tAltera > 1500) {
+      tAltera = millis();
+      esteiraEntrada = esteiraEntrada < 0 ? 0 : -1;
+      prefs.putInt("eent", esteiraEntrada);
+      tSalvo = millis();
+      avisof("Origem esteira: %s", esteiraEntrada < 0 ? "rele" : "IN1");
+    }
+  }
   if (M5StamPLC.BtnB().wasPressed()) {
     botao = true;
     if (pagina == 4) {
-      mudaTempo(1000);  // +1 segundo
+      mudaTempo(60000);  // +1 minuto
+    } else if (pagina == 2) {
+      // na tela ESTADOS o clique curto nao faz nada (clique longo alterna origem)
     } else if (fase == OCIOSO) {
       disparar("botao B", "TESTE-BOTAO");
     } else if (fase == ERRO) {
@@ -361,7 +375,7 @@ void loop() {
   }
   if (M5StamPLC.BtnC().wasPressed()) {
     botao = true;
-    if (pagina == 4) mudaTempo(-1000);  // -1 segundo
+    if (pagina == 4) mudaTempo(-60000);  // -1 minuto
     else pararTudo();
   }
   if (botao) { tBotao = millis(); tTela = 0; }
@@ -410,7 +424,7 @@ void loop() {
       break;
     case AGUARDA_LIGA:  // espera o LED de 24V indicar que esteira ligou
       if (esteiraLigada) {
-        avisof("Esteira ligou; rodando %u s", (unsigned)esteiraSegMs / 1000);
+        avisof("Esteira ligou; rodando %u min", (unsigned)esteiraSegMs / 60000);
         fase = RODANDO;
         tFase = millis();
       } else if (dt >= AGUARDA_MS) {

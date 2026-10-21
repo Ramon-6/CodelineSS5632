@@ -22,9 +22,11 @@ static char detBuf[40];
 
 static Status statusAtual() {
   if (fase == RODANDO) {
-    long resta = ((long)esteiraSegMs - (long)(millis() - tFase) + 999) / 1000;
-    if (resta < 0) resta = 0;
-    snprintf(detBuf, sizeof detBuf, "Esteira rodando, restam %ld s", resta);
+    long restaS = ((long)esteiraSegMs - (long)(millis() - tFase) + 999) / 1000;
+    if (restaS < 0) restaS = 0;
+    long m = restaS / 60, s = restaS % 60;
+    snprintf(detBuf, sizeof detBuf, "Esteira rodando, restam %ldmin %02lds", m, s);
+    long resta = restaS;  // compatibilidade
     return {"ESTEIRA RODANDO", detBuf, C_OK, 1};
   }
   if (fase == PRE_PARA_PULSA || fase == PRE_PARA_ESPERA)
@@ -221,27 +223,43 @@ static void telaReles(M5Canvas& g) {
 
 // Uma linha compacta: bolinha + nome + valor. nivel: 0 ok, 1 aviso, 2 erro
 static void linhaStatus(M5Canvas& g, int i, int nivel, const char* nome, const char* valor) {
-  int y = 33 + i * 15;
+  int y = 49 + i * 11;  // 8 linhas de 11px = 88, de y=49 a 137 (barra base em 138)
   int w = g.width();
   uint16_t cor = nivel == 0 ? C_OK : nivel == 1 ? C_WORK : C_ERR;
-  g.fillRoundRect(6, y, w - 12, 15, 3, C_CARD);
-  g.fillCircle(14, y + 7, 4, cor);
-  g.setFont(&fonts::Font2);
-  txt(g, 24, y - 1, nome, C_DIM, 11);
-  txt(g, 100, y - 1, valor, nivel == 2 ? C_ERR : C_TXT, 20);
+  g.fillRoundRect(6, y, w - 12, 10, 2, C_CARD);
+  g.fillCircle(13, y + 5, 3, cor);
+  g.setFont(&fonts::Font0);
+  txt(g, 20, y + 2, nome, C_DIM, 14);
+  txt(g, 94, y + 2, valor, nivel == 2 ? C_ERR : C_TXT, 24);
 }
 
 static void telaRede(M5Canvas& g) {
   barraTopo(g, "ESTADOS");
+  // Diagnostico de entradas: logo abaixo da barra, bem visivel
+  int w = g.width();
+  g.fillRect(0, 30, w, 16, RGB565(240, 243, 248));
+  g.setFont(&fonts::Font0);
+  g.setTextColor(C_DIM);
+  g.setCursor(4, 33);
+  g.print("IN:");
+  for (int i = 0; i < 8; i++) {
+    bool v = M5StamPLC.readPlcInput(i);
+    int x = 26 + i * 24;
+    g.fillRoundRect(x, 31, 20, 14, 3, v ? C_OK : RGB565(220, 224, 232));
+    g.setTextColor(v ? 0xFFFF : C_DIM);
+    g.setCursor(x + 6, 35);
+    g.printf("%d", i + 1);
+  }
   // Linha 0: cabo de rede
-  linhaStatus(g, 0, linkOk ? 0 : 2, "Cabo rede", linkOk ? "conectado" : "DESCONECT.");
   // Linha 1: StamPLC IP
   linhaStatus(g, 1, linkOk ? 0 : 2, "IP local", ipTxt);
   // Linha 2: impressora
   String pi = ipImpressora.toString();
   linhaStatus(g, 2, online ? 0 : 2, "Impressora", online ? pi.c_str() : "sem resposta");
-  // Linha 3: esteira (motor)
-  linhaStatus(g, 3, esteiraLigada ? 0 : 1, "Esteira", esteiraLigada ? "RODANDO" : "parada");
+  // Linha 3: esteira (motor) com indicacao do modo (via IN1 ou via rele)
+  char eb[32];
+  snprintf(eb, sizeof eb, "%s (%s)", esteiraLigada ? "RODANDO" : "parada", esteiraEntrada < 0 ? "rele" : "IN1");
+  linhaStatus(g, 3, esteiraLigada ? 0 : 1, "Esteira", eb);
   // Linha 4: alarme da impressora
   bool alarme = online && ultimoSnap.alarme;
   linhaStatus(g, 4, alarme ? 2 : 0, "Alarme imp.", alarme ? "ATIVO" : "normal");
@@ -277,7 +295,7 @@ static void telaAjustes(M5Canvas& g) {
   g.setFont(&fonts::Font0);
   txt(g, 12, 40, "TEMPO DA ESTEIRA RODANDO", C_DIM, 28);
   char b[24];
-  snprintf(b, sizeof b, "%u s", (unsigned)esteiraSegMs / 1000);
+  snprintf(b, sizeof b, "%u min", (unsigned)esteiraSegMs / 60000);
   g.setFont(&fonts::Font6);
   g.setTextColor(C_TXT, C_CARD);
   g.setCursor(14, 50);
@@ -288,7 +306,7 @@ static void telaAjustes(M5Canvas& g) {
     txt(g, w - 60, 46, "SALVO", C_OK, 6);
   } else {
     g.setFont(&fonts::Font0);
-    txt(g, w - 108, 68, "B = +1s   C = -1s", C_DIM, 22);
+    txt(g, w - 108, 68, "B = +1min  C = -1min", C_DIM, 24);
   }
   g.fillRoundRect(6, 96, w - 12, 46, 8, C_CARD);
   g.setFont(&fonts::Font0);
@@ -307,25 +325,23 @@ static void telaOperando(M5Canvas& g) {
   const char* tit = "ESTEIRA RODANDO";
   g.setCursor((w - g.textWidth(tit)) / 2, 6);
   g.print(tit);
-  // Tempo gigante + "s" ao lado, tudo centralizado em uma unica linha
-  long resta = ((long)esteiraSegMs - (long)(millis() - tFase) + 999) / 1000;
-  if (resta < 0) resta = 0;
+  // Tempo gigante no formato MM:SS centralizado numa linha so
+  long restaS = ((long)esteiraSegMs - (long)(millis() - tFase) + 999) / 1000;
+  if (restaS < 0) restaS = 0;
   char tm[16];
-  snprintf(tm, sizeof tm, "%ld", resta);
-  g.setFont(&fonts::Font8);  // numero gigante
+  snprintf(tm, sizeof tm, "%ld:%02ld", restaS / 60, restaS % 60);
+  g.setFont(&fonts::Font7);  // 7-segmentos grande
   int tw = g.textWidth(tm);
   int th = g.fontHeight();
-  g.setFont(&fonts::Font4);  // "s" medio
-  int sw = g.textWidth(" s");
-  int total = tw + sw;
-  int x0 = (w - total) / 2;
-  int y0 = (h - th) / 2 + 2;  // centraliza vertical com um leve descer
-  g.setFont(&fonts::Font8);
+  int x0 = (w - tw) / 2;
+  int y0 = (h - th) / 2 + 2;
   g.setCursor(x0, y0);
   g.print(tm);
-  g.setFont(&fonts::Font4);
-  g.setCursor(x0 + tw + 2, y0 + th - 40);  // "s" alinhado ao pe do numero
-  g.print("s");
+  // rotulo min:seg abaixo do tempo
+  g.setFont(&fonts::Font2);
+  const char* lbl = "min : seg";
+  g.setCursor((w - g.textWidth(lbl)) / 2, y0 + th + 2);
+  g.print(lbl);
   // Rodape: codigo
   if (ultCodigo[0]) {
     g.setFont(&fonts::Font2);

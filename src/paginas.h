@@ -170,14 +170,14 @@ static void paginaPainel(EthernetClient& c) {
   c.printf("<p class='nota'>Esteira ligada = %s.</p>", esteiraDesc().c_str());
 
   c.printf("<h1>Tempo do rele</h1><div class='card' style='display:flex;align-items:center;gap:10px;flex-wrap:wrap'>"
-           "<span>Fechado por <b style='font-size:24px'>%.1f s</b></span>"
-           "<a class='btn sec' href='/tempo?v=menos'>&minus; 0,5 s</a><a class='btn sec' href='/tempo?v=mais'>+ 0,5 s</a></div>",
-           esteiraSegMs / 1000.0);
+           "<span>Esteira roda por <b style='font-size:24px'>%.0f min</b></span>"
+           "<a class='btn sec' href='/tempo?v=menos'>&minus; 1 min</a><a class='btn sec' href='/tempo?v=mais'>+ 1 min</a></div>",
+           esteiraSegMs / 60000.0);
   c.print("<h1>Reles</h1><div class='rel'>");
   for (int i = 0; i < 4; i++)
     c.printf("<div class='%s'>R%d<small>%s</small></div>", relEst[i] ? "on" : "", i + 1, relEst[i] ? "FECHADO" : "aberto");
-  c.printf("</div><p class='nota'>O rele <b>R%d</b> fecha quando o codigo e lido e abre depois de %.1f s.</p>",
-           RELE_CANAL + 1, esteiraSegMs / 1000.0);
+  c.printf("</div><p class='nota'>O rele <b>R%d</b> fecha quando o codigo e lido e abre depois de %.0f min.</p>",
+           RELE_CANAL + 1, esteiraSegMs / 60000.0);
 
   c.print("<h1>Conexoes</h1><table>");
   linhaConexao(c, linkOk, "Cabo de rede", linkOk ? "conectado" : "desconectado");
@@ -296,10 +296,10 @@ static void paginaConfig(EthernetClient& c, const char* erro, const char* sucess
   if (sucesso) c.printf("<div class='alert ok'>%s</div>", sucesso);
   if (erro) c.printf("<div class='alert'>%s</div>", erro);
   c.printf("<form action='/salvar'><h1>Rele</h1>"
-           "<label>Tempo da esteira rodando (segundos)</label><input name='tempo' value='%.0f'>"
-           "<p class='nota'>Entre 1 e 600 segundos. Tambem da para mudar direto na tela do equipamento (tela 5, botoes B e C).</p>"
+           "<label>Tempo da esteira rodando (minutos)</label><input name='tempo' value='%.0f'>"
+           "<p class='nota'>Entre 1 e 600 minutos. Tambem da para mudar direto na tela do equipamento (tela 5, botoes B e C).</p>"
            "<h1>Esteira</h1><label>Como saber se a esteira esta ligada?</label><select name='eent'>",
-           esteiraSegMs / 1000.0);
+           esteiraSegMs / 60000.0);
   c.printf("<option value='-1'%s>Pelo rele (R%d fechado = esteira ligada)</option>", esteiraEntrada < 0 ? " selected" : "", RELE_CANAL + 1);
   for (int i = 0; i < 8; i++) c.printf("<option value='%d'%s>Pela entrada %d do StamPLC</option>", i, esteiraEntrada == i ? " selected" : "", i + 1);
   c.printf("</select><label>Nivel do sinal da entrada</label><select name='ealto'>"
@@ -371,7 +371,7 @@ static void atendeWeb() {
     if (fase == OCIOSO) disparar("teste pelo painel", "TESTE-PAINEL");
     redireciona(c, "/");
   } else if (caminho == "/tempo") {
-    mudaTempo(param(q, "v") == "mais" ? 500 : -500);
+    mudaTempo(param(q, "v") == "mais" ? 60000 : -60000);
     redireciona(c, "/");
   } else if (caminho == "/parar") {
     pararTudo();
@@ -389,9 +389,9 @@ static void atendeWeb() {
     IPAddress tmp, i1, i2, i3;
     String pip = param(q, "pip"), ip = param(q, "ip"), gw = param(q, "gw"), tempo = param(q, "tempo");
     tempo.replace(",", ".");
-    long ms = lround(tempo.toFloat() * 1000.0f);
+    long ms = lround(tempo.toFloat() * 60000.0f);
     int eent = param(q, "eent").toInt();
-    if (i1.fromString(pip) && i2.fromString(ip) && i3.fromString(gw) && ms >= 1000 && ms <= 600000 && eent >= -1 && eent <= 7) {
+    if (i1.fromString(pip) && i2.fromString(ip) && i3.fromString(gw) && ms >= 60000 && ms <= 36000000L && eent >= -1 && eent <= 7) {
       prefs.putString("pip", pip);
       prefs.putString("ip", ip);
       prefs.putString("gw", gw);
