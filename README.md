@@ -6,6 +6,7 @@ da impressora, o PLC detecta a leitura por Modbus TCP, pulsa um relé para
 ligar a esteira, cronometra o tempo configurado e no fim pulsa de novo
 para parar. No final apaga o código da impressora para forçar o operador
 a ler um novo antes do próximo lote.
+
 <img width="400" height="400" alt="IMG_8380-web" src="https://github.com/user-attachments/assets/0beac44a-3027-48e0-895f-a7b694e67685" />
 
 ## Hardware
