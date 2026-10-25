@@ -16,6 +16,7 @@ a ler um novo antes do próximo lote.
 - **Impressora Codeline SS5632** (base de dados em cima do protocolo
   "FKK-5.1.13.0", disponibilizado via Modbus TCP + protocolo privado
   nas portas 4008 e 4040)
+<img width="221" height="177" alt="Captura de tela 2026-10-25 134256" src="https://github.com/user-attachments/assets/17d0a32a-965d-4e97-8897-01a833d0f439" />
 
 ## Ligações físicas
 
