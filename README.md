@@ -1,4 +1,4 @@
-# Automação Sumiriko — Impressora + StamPLC
+# Automação  — Impressora + StamPLC >> Leitura >> ciclo >>limpeza de cache
 
 Integração entre uma impressora de inkjet industrial Codeline SS5632 e um
 StamPLC (M5Stack). Quando o operador lê o código de barras no leitor USB
