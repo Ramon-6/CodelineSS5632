@@ -27,7 +27,14 @@ static Status statusAtual() {
     long m = restaS / 60, s = restaS % 60;
     snprintf(detBuf, sizeof detBuf, "Esteira rodando, restam %ldmin %02lds", m, s);
     long resta = restaS;  // compatibilidade
+    (void)resta;
     return {"ESTEIRA RODANDO", detBuf, C_OK, 1};
+  }
+  if (fase == PAUSADA) {
+    long resta = ((long)esperaRetomarMs - (long)(millis() - tFase) + 999) / 1000;
+    if (resta < 0) resta = 0;
+    snprintf(detBuf, sizeof detBuf, "Esteira caiu - religue em %lds", resta);
+    return {"PAUSADA", detBuf, C_WORK, 1};
   }
   if (fase == PRE_PARA_PULSA || fase == PRE_PARA_ESPERA)
     return {"AJUSTANDO", "Esteira ja rodava, parando antes", C_WORK, 1};
@@ -35,6 +42,14 @@ static Status statusAtual() {
     return {"LIGANDO ESTEIRA", "Pulsando o botao...", C_WORK, 1};
   if (fase == PULSA_PARA || fase == AGUARDA_PARA)
     return {"PARANDO ESTEIRA", "Pulsando o botao...", C_WORK, 1};
+  if (fase == PARA_INSISTE) {
+    long resta = ((long)esperaRetomarMs - (long)(millis() - tFase) + 999) / 1000;
+    if (resta < 0) resta = 0;
+    snprintf(detBuf, sizeof detBuf, "Nao parou! Pare manual em %lds", resta);
+    return {"ESTEIRA TRAVADA", detBuf, C_ERR, 2};
+  }
+  if (fase == PARA_SEM_CODIGO)
+    return {"CODIGO APAGADO", "Aguardando esteira parar", C_WORK, 1};
   if (fase == ERRO) return {"ERRO NO CICLO", erroMsg, C_ERR, 2};
   if (!linkOk) return {"SEM REDE", "Cabo de rede desconectado", C_ERR, 2};
   if (fase == LIMPANDO) {
@@ -251,8 +266,10 @@ static void telaRede(M5Canvas& g) {
     g.printf("%d", i + 1);
   }
   // Linha 0: cabo de rede
-  // Linha 1: StamPLC IP
-  linhaStatus(g, 1, linkOk ? 0 : 2, "IP local", ipTxt);
+  // Linha 1: StamPLC IP (com indicacao DHCP/fixo)
+  char ipb[32];
+  snprintf(ipb, sizeof ipb, "%s (%s)", ipTxt, usaDhcp ? "DHCP" : "fixo");
+  linhaStatus(g, 1, linkOk ? 0 : 2, "IP local", ipb);
   // Linha 2: impressora
   String pi = ipImpressora.toString();
   linhaStatus(g, 2, online ? 0 : 2, "Impressora", online ? pi.c_str() : "sem resposta");
@@ -308,11 +325,18 @@ static void telaAjustes(M5Canvas& g) {
     g.setFont(&fonts::Font0);
     txt(g, w - 108, 68, "B = +1min  C = -1min", C_DIM, 24);
   }
-  g.fillRoundRect(6, 96, w - 12, 46, 8, C_CARD);
+  g.fillRoundRect(6, 96, w - 12, 24, 6, C_CARD);
   g.setFont(&fonts::Font0);
   txt(g, 12, 100, "ORIGEM DA ESTEIRA", C_DIM, 24);
   g.setFont(&fonts::Font2);
-  txt(g, 12, 115, esteiraDesc().c_str(), C_TXT, 32);
+  txt(g, 12, 110, esteiraDesc().c_str(), C_TXT, 32);
+  g.fillRoundRect(6, 122, w - 12, 18, 4, C_CARD);
+  g.setFont(&fonts::Font0);
+  txt(g, 12, 125, "TOLERANCIA SE PARAR", C_DIM, 24);
+  char eb[16];
+  snprintf(eb, sizeof eb, "%u min", (unsigned)(esperaRetomarMs / 60000));
+  g.setFont(&fonts::Font2);
+  txt(g, 130, 123, eb, C_TXT, 12);
 }
 
 // Tela de operacao: fundo verde + tempo gigante branco. Aparece sozinha enquanto a esteira roda.
@@ -391,6 +415,36 @@ static void desenhaTela() {
   }
   // Em operacao: ignora navegacao e mostra a tela de ciclo colorida (fullscreen)
   if (fase == RODANDO) { telaOperando(*cv); cv->pushSprite(0, 0); return; }
+  if (fase == PAUSADA) {
+    // Tela especial: fundo amarelo, grande, contagem regressiva da espera
+    int w = cv->width(), h = cv->height();
+    cv->fillScreen(C_WORK);
+    cv->setFont(&fonts::Font2);
+    cv->setTextColor(0xFFFF);
+    const char* t1 = "ESTEIRA PAROU";
+    cv->setCursor((w - cv->textWidth(t1)) / 2, 6);
+    cv->print(t1);
+    long restaS = ((long)esperaRetomarMs - (long)(millis() - tFase) + 999) / 1000;
+    if (restaS < 0) restaS = 0;
+    char tm[16];
+    snprintf(tm, sizeof tm, "%ld:%02ld", restaS / 60, restaS % 60);
+    cv->setFont(&fonts::Font7);
+    int tw = cv->textWidth(tm);
+    int th = cv->fontHeight();
+    cv->setCursor((w - tw) / 2, (h - th) / 2 - 4);
+    cv->print(tm);
+    cv->setFont(&fonts::Font2);
+    const char* lbl = "religue a esteira";
+    cv->setCursor((w - cv->textWidth(lbl)) / 2, (h - th) / 2 + th);
+    cv->print(lbl);
+    char b[32];
+    snprintf(b, sizeof b, "restam %lus do ciclo", (unsigned long)(tempoRestanteMs / 1000));
+    cv->setFont(&fonts::Font0);
+    cv->setCursor((w - cv->textWidth(b)) / 2, h - 20);
+    cv->print(b);
+    cv->pushSprite(0, 0);
+    return;
+  }
   if (fase == PRE_PARA_PULSA || fase == PRE_PARA_ESPERA) {
     telaFase(*cv, C_WORK, 0xFFFF, "PARANDO ANTES", "Esteira ja rodava, ajustando", true);
     cv->pushSprite(0, 0);
@@ -403,6 +457,36 @@ static void desenhaTela() {
   }
   if (fase == PULSA_PARA || fase == AGUARDA_PARA) {
     telaFase(*cv, C_WORK, 0xFFFF, "PARANDO ESTEIRA", "Tempo esgotado", true);
+    cv->pushSprite(0, 0);
+    return;
+  }
+  if (fase == PARA_INSISTE) {
+    // tela vermelha pulsante com cronometro
+    int w = cv->width(), h = cv->height();
+    cv->fillScreen(C_ERR);
+    cv->setFont(&fonts::Font2);
+    cv->setTextColor(0xFFFF);
+    const char* t1 = "ESTEIRA NAO PAROU";
+    cv->setCursor((w - cv->textWidth(t1)) / 2, 6);
+    cv->print(t1);
+    long resta = ((long)esperaRetomarMs - (long)(millis() - tFase) + 999) / 1000;
+    if (resta < 0) resta = 0;
+    char tm[16];
+    snprintf(tm, sizeof tm, "%ld:%02ld", resta / 60, resta % 60);
+    cv->setFont(&fonts::Font7);
+    int tw = cv->textWidth(tm);
+    int th = cv->fontHeight();
+    cv->setCursor((w - tw) / 2, (h - th) / 2 - 4);
+    cv->print(tm);
+    cv->setFont(&fonts::Font2);
+    const char* lbl = "pare manual AGORA";
+    cv->setCursor((w - cv->textWidth(lbl)) / 2, (h - th) / 2 + th);
+    cv->print(lbl);
+    cv->pushSprite(0, 0);
+    return;
+  }
+  if (fase == PARA_SEM_CODIGO) {
+    telaFase(*cv, C_WORK, 0xFFFF, "ESTEIRA LIGADA", "Codigo apagado - pare a esteira", true);
     cv->pushSprite(0, 0);
     return;
   }

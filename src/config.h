@@ -21,11 +21,13 @@
 #define TRIGGER_TEXTO   1
 #define TRIGGER_CACHE   1
 
-// Como apagar o codigo da impressora depois do rele:
-//   0 = Modbus, bobina 0x0002 ("limpar cache de dados de rede")
-//   1 = protocolo privado, porta 4008, comando 0x10
-#define LIMPAR_METODO   0
+// Como apagar o codigo visivel na impressora no fim do ciclo:
+//   0 = Modbus, bobina 0x0002 (NAO limpa o codigo do leitor USB)
+//   1 = protocolo privado, porta 4008, comando 0x10 (clear cache)
+//   2 = porta 4008, comando 0x33 (reload template - APAGA O CODIGO DO LEITOR) <- usar este
+#define LIMPAR_METODO   2
 #define LIMPAR_TENTATIVAS 3
+#define TEMPLATE_NOME   "sumi rico"  // nome do template atual na impressora
 
 // ---- Esteira (referencia do LED 24V do botao pulsante) -------------------
 // 0 = IN1 do StamPLC (recebe o 24V do LED do botao: aceso = esteira rodando)

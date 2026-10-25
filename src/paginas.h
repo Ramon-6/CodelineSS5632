@@ -298,6 +298,8 @@ static void paginaConfig(EthernetClient& c, const char* erro, const char* sucess
   c.printf("<form action='/salvar'><h1>Rele</h1>"
            "<label>Tempo da esteira rodando (minutos)</label><input name='tempo' value='%.0f'>"
            "<p class='nota'>Entre 1 e 600 minutos. Tambem da para mudar direto na tela do equipamento (tela 5, botoes B e C).</p>"
+           "<label>Tolerancia se esteira cair no meio (minutos)</label><input name='espera' value='%u'>"
+           "<p class='nota'>Se a esteira parar durante o ciclo, o PLC espera este tempo pelo operador religar. Se religar, continua. Se nao, apaga o codigo e cancela.</p>"
            "<h1>Esteira</h1><label>Como saber se a esteira esta ligada?</label><select name='eent'>",
            esteiraSegMs / 60000.0);
   c.printf("<option value='-1'%s>Pelo rele (R%d fechado = esteira ligada)</option>", esteiraEntrada < 0 ? " selected" : "", RELE_CANAL + 1);
@@ -390,6 +392,8 @@ static void atendeWeb() {
     String pip = param(q, "pip"), ip = param(q, "ip"), gw = param(q, "gw"), tempo = param(q, "tempo");
     tempo.replace(",", ".");
     long ms = lround(tempo.toFloat() * 60000.0f);
+    long espms = param(q, "espera").toInt() * 60000L;
+    if (espms < 10000) espms = 60000;  // minimo 10s, default 1 min
     int eent = param(q, "eent").toInt();
     if (i1.fromString(pip) && i2.fromString(ip) && i3.fromString(gw) && ms >= 60000 && ms <= 36000000L && eent >= -1 && eent <= 7) {
       prefs.putString("pip", pip);
@@ -398,6 +402,7 @@ static void atendeWeb() {
       prefs.putUInt("etempo", (uint32_t)ms);
       prefs.putInt("eent", eent);
       prefs.putBool("ealto", param(q, "ealto") != "0");
+      prefs.putUInt("esper", (uint32_t)espms);
       abre(c, "config", "Salvo");
       c.printf("<h1>Salvo</h1><p>O equipamento esta reiniciando. Em cerca de 10 segundos voce sera levado para "
                "<b>http://%s/</b>.</p><script>setTimeout(function(){location='http://%s/'},12000)</script>",
