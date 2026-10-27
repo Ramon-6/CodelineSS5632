@@ -9,7 +9,12 @@ static const uint16_t C_BG = RGB565(246, 247, 250), C_BAR = 0xFFFF, C_CARD = 0xF
                       C_OK = RGB565(16, 136, 68), C_OKBG = RGB565(220, 243, 227),
                       C_WORK = RGB565(185, 115, 0), C_WORKBG = RGB565(254, 240, 203),
                       C_ERR = RGB565(192, 32, 32), C_ERRBG = RGB565(252, 219, 219),
-                      C_TXT = RGB565(28, 32, 42), C_DIM = RGB565(110, 118, 134);
+                      C_TXT = RGB565(28, 32, 42), C_DIM = RGB565(110, 118, 134),
+                      // Cores das telas fullscreen de operacao
+                      C_PRONTO = RGB565(32, 108, 196),   // azul PRONTO
+                      C_MIX_A  = RGB565(230, 110, 20),   // laranja MIX A
+                      C_MIX_B  = RGB565(0, 158, 180),    // ciano  MIX B
+                      C_FIM    = RGB565(120, 60, 180);   // roxo   FIM DE CICLO
 
 // nivel: 0 = tudo certo, 1 = trabalhando, 2 = problema
 struct Status {
@@ -22,13 +27,12 @@ static char detBuf[40];
 
 static Status statusAtual() {
   if (fase == RODANDO) {
-    long restaS = ((long)esteiraSegMs - (long)(millis() - tFase) + 999) / 1000;
+    long restaS = ((long)cicloTempoMs - (long)(millis() - tFase) + 999) / 1000;
     if (restaS < 0) restaS = 0;
     long m = restaS / 60, s = restaS % 60;
-    snprintf(detBuf, sizeof detBuf, "Esteira rodando, restam %ldmin %02lds", m, s);
-    long resta = restaS;  // compatibilidade
-    (void)resta;
-    return {"ESTEIRA RODANDO", detBuf, C_OK, 1};
+    const char* nome = cicloMix == 'A' ? "MIX A" : cicloMix == 'B' ? "MIX B" : "ESTEIRA RODANDO";
+    snprintf(detBuf, sizeof detBuf, "Restam %ldmin %02lds", m, s);
+    return {nome, detBuf, C_OK, 1};
   }
   if (fase == PAUSADA) {
     long resta = ((long)esperaRetomarMs - (long)(millis() - tFase) + 999) / 1000;
@@ -339,38 +343,97 @@ static void telaAjustes(M5Canvas& g) {
   txt(g, 130, 123, eb, C_TXT, 12);
 }
 
-// Tela de operacao: fundo verde + tempo gigante branco. Aparece sozinha enquanto a esteira roda.
+// Tela de operacao: fundo colorido por receita + tempo gigante.
 static void telaOperando(M5Canvas& g) {
   int w = g.width(), h = g.height();
-  g.fillScreen(C_OK);
-  // Topo: titulo
-  g.setFont(&fonts::Font2);
+  uint16_t fundo = cicloMix == 'A' ? C_MIX_A : cicloMix == 'B' ? C_MIX_B : C_OK;
+  g.fillScreen(fundo);
+  // Topo: titulo grande com o nome do mix (ou "RODANDO")
+  const char* tit = cicloMix == 'A' ? "MIX A" : cicloMix == 'B' ? "MIX B" : "RODANDO";
+  g.setFont(&fonts::Font4);
   g.setTextColor(0xFFFF);
-  const char* tit = "ESTEIRA RODANDO";
-  g.setCursor((w - g.textWidth(tit)) / 2, 6);
+  g.setCursor((w - g.textWidth(tit)) / 2, 4);
   g.print(tit);
-  // Tempo gigante no formato MM:SS centralizado numa linha so
-  long restaS = ((long)esteiraSegMs - (long)(millis() - tFase) + 999) / 1000;
+  // Tempo gigante MM:SS
+  long restaS = ((long)cicloTempoMs - (long)(millis() - tFase) + 999) / 1000;
   if (restaS < 0) restaS = 0;
   char tm[16];
   snprintf(tm, sizeof tm, "%ld:%02ld", restaS / 60, restaS % 60);
   g.setFont(&fonts::Font7);  // 7-segmentos grande
   int tw = g.textWidth(tm);
   int th = g.fontHeight();
-  int x0 = (w - tw) / 2;
-  int y0 = (h - th) / 2 + 2;
-  g.setCursor(x0, y0);
+  int y0 = (h - th) / 2 + 4;
+  g.setCursor((w - tw) / 2, y0);
   g.print(tm);
-  // rotulo min:seg abaixo do tempo
   g.setFont(&fonts::Font2);
   const char* lbl = "min : seg";
   g.setCursor((w - g.textWidth(lbl)) / 2, y0 + th + 2);
   g.print(lbl);
-  // Rodape: codigo
   if (ultCodigo[0]) {
-    g.setFont(&fonts::Font2);
     char b[48];
-    snprintf(b, sizeof b, "Codigo: %.16s", ultCodigo);
+    snprintf(b, sizeof b, "%.20s", ultCodigo);
+    g.setCursor((w - g.textWidth(b)) / 2, h - 20);
+    g.print(b);
+  }
+}
+
+// Tela PRONTO: fundo azul + palavra gigante
+static void telaPronto(M5Canvas& g) {
+  int w = g.width(), h = g.height();
+  g.fillScreen(C_PRONTO);
+  g.setFont(&fonts::Font7);
+  g.setTextColor(0xFFFF);
+  const char* t = "PRONTO";
+  // Font7 e numeros so - usa Font4 para letras
+  g.setFont(&fonts::Font4);
+  // engrossar: dupla passada
+  int tw = g.textWidth(t);
+  int y = (h - g.fontHeight()) / 2 - 10;
+  for (int dx = 0; dx <= 1; dx++)
+    for (int dy = 0; dy <= 1; dy++) {
+      g.setCursor((w - tw) / 2 + dx, y + dy);
+      g.print(t);
+    }
+  g.setFont(&fonts::Font2);
+  const char* sub = "Leia o codigo da peca";
+  g.setCursor((w - g.textWidth(sub)) / 2, y + g.fontHeight() + 20);
+  g.print(sub);
+  // Rodape: hora atual
+  if (horaOk) {
+    char d[16], hh[10], b[32];
+    carimbo(d, hh);
+    snprintf(b, sizeof b, "%s", hh);
+    g.setFont(&fonts::Font2);
+    g.setCursor(6, h - 20);
+    g.print(b);
+  }
+  // canto direito: modo
+  const char* modo = modoManual ? "MANUAL" : "AUTO";
+  g.setFont(&fonts::Font2);
+  g.setCursor(w - g.textWidth(modo) - 6, h - 20);
+  g.print(modo);
+}
+
+// Tela FIM DE CICLO: fundo roxo + mensagem grande
+static void telaFimCiclo(M5Canvas& g, const char* motivo) {
+  int w = g.width(), h = g.height();
+  g.fillScreen(C_FIM);
+  g.setFont(&fonts::Font4);
+  g.setTextColor(0xFFFF);
+  const char* t = "FIM DE CICLO";
+  int tw = g.textWidth(t);
+  int y = h / 2 - 24;
+  for (int dx = 0; dx <= 1; dx++)
+    for (int dy = 0; dy <= 1; dy++) {
+      g.setCursor((w - tw) / 2 + dx, y + dy);
+      g.print(t);
+    }
+  g.setFont(&fonts::Font2);
+  g.setCursor((w - g.textWidth(motivo)) / 2, h / 2 + 10);
+  g.print(motivo);
+  if (ultCodigo[0]) {
+    char b[48];
+    snprintf(b, sizeof b, "%.20s", ultCodigo);
     g.setCursor((w - g.textWidth(b)) / 2, h - 20);
     g.print(b);
   }
@@ -491,14 +554,30 @@ static void desenhaTela() {
     return;
   }
   if (fase == LIMPANDO) {
-    uint16_t cf = falhaLimpeza ? C_ERR : RGB565(30, 120, 200);  // azul normal, vermelho se falha
-    const char* sub = falhaLimpeza ? "Impressora nao responde, insistindo" : "Mandando limpar o cache...";
-    telaFase(*cv, cf, 0xFFFF, falhaLimpeza ? "FALHA AO APAGAR" : "APAGANDO CODIGO", sub, true);
+    if (falhaLimpeza) {
+      telaFase(*cv, C_ERR, 0xFFFF, "FALHA AO APAGAR", "Impressora nao responde", true);
+    } else {
+      telaFimCiclo(*cv, "Apagando codigo da impressora");
+    }
     cv->pushSprite(0, 0);
     return;
   }
   if (fase == ERRO) {
     telaFase(*cv, C_ERR, 0xFFFF, "ERRO NO CICLO", erroMsg, true);
+    cv->pushSprite(0, 0);
+    return;
+  }
+  // OCIOSO + painel: tela PRONTO fullscreen (ou FIM DE CICLO por 3s depois do ciclo)
+  if (fase == OCIOSO && pagina == 0) {
+    if (tMostraFim && millis() - tMostraFim < 3000) {
+      telaFimCiclo(*cv, "Pronto para proximo lote");
+    } else if (online && !sireneAtiva) {
+      telaPronto(*cv);
+    } else if (sireneAtiva) {
+      telaFase(*cv, C_WORK, 0xFFFF, "LIMPAR CABECOTE", "Sirene ligada - abra a tampa", false);
+    } else {
+      telaFase(*cv, C_ERR, 0xFFFF, "SEM IMPRESSORA", "Verifique cabo e IP", false);
+    }
     cv->pushSprite(0, 0);
     return;
   }

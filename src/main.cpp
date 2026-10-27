@@ -405,6 +405,10 @@ static uint32_t encoderUltContador = 0;
 static unsigned long tUltMudouContador = 0;
 static unsigned long tLogContador = 0;
 
+// Momento em que o ultimo ciclo terminou - usado pra mostrar FIM DE CICLO
+// na tela por 3s antes de voltar ao PRONTO.
+unsigned long tMostraFim = 0;
+
 // Carrega/salva horarios da sirene em formato "HH:MM,HH:MM,HH:MM"
 static void sireneSerializa(char* out, size_t n) {
   snprintf(out, n, "%02d:%02d,%02d:%02d,%02d:%02d",
@@ -517,8 +521,8 @@ void setup() {
   if (tmp.fromString(prefs.getString("pip", ""))) ipImpressora = tmp;
   if (tmp.fromString(prefs.getString("ip", ""))) ipLocal = tmp;
   if (tmp.fromString(prefs.getString("gw", ""))) ipGw = tmp;
-  esteiraSegMs = prefs.getUInt("etempo", 600000);  // padrao: 10 minutos
-  if (esteiraSegMs < 60000) esteiraSegMs = 600000;  // migra valores antigos em segundos
+  esteiraSegMs = prefs.getUInt("etempo", RELE_TEMPO_MS);  // padrao: 8 min
+  if (esteiraSegMs < 60000) esteiraSegMs = RELE_TEMPO_MS;  // migra valores antigos
   esteiraEntrada = prefs.getInt("eent", ESTEIRA_ENTRADA);
   esteiraAlto = prefs.getBool("ealto", ESTEIRA_ATIVO_ALTO);
   usaDhcp = prefs.getBool("dhcp", false);
@@ -712,8 +716,8 @@ void loop() {
 
   // Maquina de estados do ciclo da esteira
   unsigned long dt = millis() - tFase;
-  // ERRO auto-recupera em 10s (apaga codigo e volta pro OCIOSO sem precisar de operador)
-  if (fase == ERRO && dt >= 10000) {
+  // ERRO auto-recupera em 5s (apaga codigo e volta pro OCIOSO sem precisar de operador)
+  if (fase == ERRO && dt >= 5000) {
     avisof("Erro resolvido automaticamente - apagando codigo");
     falhaLimpeza = false;
     M5StamPLC.setStatusLight(0, 0, 0);
@@ -890,6 +894,8 @@ void loop() {
       temBase = false;
       fase = OCIOSO;
       estLimpa = LIMP_PEDIR;
+      tMostraFim = millis();  // mostra "FIM DE CICLO" por 3s na tela
+      cicloMix = 0;
     }
   }
 

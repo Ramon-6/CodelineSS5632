@@ -11,7 +11,7 @@
 
 // ---- Automacao -------------------------------------------------------
 #define RELE_CANAL      0        // 0..3 (Relay 1..4 do StamPLC) - esteira
-#define RELE_TEMPO_MS   600000   // tempo padrao da esteira rodando (10 min) - alteravel na tela
+#define RELE_TEMPO_MS   480000   // tempo padrao da esteira (8 min) - alteravel na tela
 #define POLL_MS         100      // intervalo de leitura da impressora
 
 // O que conta como "operador leu o codigo":
@@ -53,8 +53,8 @@
 // "MIX B" (case-insensitive) e usamos o tempo correspondente. Sem MIX = usa
 // RELE_TEMPO_MS normal.
 #define MIX_RECIPE_HABILITADO  1
-#define TEMPO_MIX_A_MS         600000    // 10 min
-#define TEMPO_MIX_B_MS         900000    // 15 min
+#define TEMPO_MIX_A_MS         240000    // 4 min
+#define TEMPO_MIX_B_MS         480000    // 8 min
 
 // ---- Modo manual/automatico (ponto 5) ---------------------------------
 // AUTO (padrao): PLC controla relé conforme leitura da impressora.
@@ -68,7 +68,7 @@
 // (volta a 0). Deixe HABILITADO=0 ate ajustar os horarios no painel.
 #define SIRENE_LIMPEZA_HABILITADO 0
 #define SIRENE_CANAL              1       // R2
-#define SIRENE_HORARIOS_PADRAO    "08:00,13:00,18:00"
+#define SIRENE_HORARIOS_PADRAO    "07:00,16:00,00:00"
 
 // ---- Encoder/contador 4x0061 (ponto 6) --------------------------------
 // Fase 1 (atual): so loga no CSV o valor do contador a cada N segundos.
