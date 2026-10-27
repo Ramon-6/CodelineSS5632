@@ -48,6 +48,19 @@
 // em 0 se tiver medo de perder um codigo valido logo apos reset.
 #define APAGA_AO_CONECTAR   1
 
+// Teto global: estados intermediarios (PARA_INSISTE, PARA_SEM_CODIGO) nao podem
+// durar mais que isso. Depois cai em ERRO que apaga codigo e volta pro PRONTO.
+#define TEMPO_MAX_FASE_MS   120000  // 2 min
+// Reset automatico depois do ERRO: apaga codigo e volta pro OCIOSO para o
+// operador ser forcado a ler um codigo novo. Operador NAO tem acesso ao PLC,
+// entao erro nao pode travar producao.
+#define ERRO_RESET_MS       5000
+// Limpeza do codigo: numero maximo de tentativas antes de desistir e forcar OCIOSO.
+// A impressora pode estar offline/travada; o importante e nao prender o PLC.
+#define LIMPANDO_MAX_TENTATIVAS 20
+// Debug: envia pela serial toda mudanca de registro Modbus. Desligar em producao.
+#define DEBUG_SCANNER_MODBUS 0
+
 // ---- Receitas MIX A / MIX B (ponto 3) ---------------------------------
 // Texto lido no scanner vem tipo: "23.010.3062 MIX A". Detectamos "MIX A" ou
 // "MIX B" (case-insensitive) e usamos o tempo correspondente. Sem MIX = usa

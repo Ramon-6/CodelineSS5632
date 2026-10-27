@@ -16,7 +16,6 @@ static IPAddress ipImpressora(IMPRESSORA_IP);
 static uint32_t esteiraSegMs = RELE_TEMPO_MS;
 static Preferences prefs;  // ajustes salvos na placa (sobrevivem a reinicio)
 
-static EthernetClient p4008;        // nao usado (compatibilidade)
 static EthernetServer web(80);
 
 // ---- Log (serial + pagina web) ---------------------------------------
@@ -179,7 +178,7 @@ static bool recarregarTemplate() {
   Serial.print("[0x33] conectar 4008... ");
   if (!c.connect(ipImpressora, 4008)) {
     Serial.println("FALHOU conectar");
-    return true;  // nao fica em loop
+    return false;  // caller trata a falha (contador de tentativas)
   }
   Serial.print("OK, enviando... ");
   size_t sent = c.write(pkt, 8 + nlen);
@@ -409,6 +408,24 @@ static unsigned long tLogContador = 0;
 // na tela por 3s antes de voltar ao PRONTO.
 unsigned long tMostraFim = 0;
 
+// Estado da limpeza (global - antes era static dentro do loop e ficava com estado
+// errado se operador cancelasse via pararTudo durante LIMP_ESPERAR)
+static enum { LIMP_PEDIR, LIMP_ESPERAR } estLimpa = LIMP_PEDIR;
+static int limpTentativas = 0;  // contador para desistir depois de LIMPANDO_MAX_TENTATIVAS
+
+// Vai pro estado ERRO limpando o buzzer, luz vermelha e tempo resetado. Em 5s
+// o loop pega e manda pro LIMPANDO (que apaga codigo e volta ao OCIOSO). Nunca
+// trava o operador: ele so precisa ler codigo de novo.
+static void irParaErro(const char* msg) {
+  erroMsg = msg;
+  fase = ERRO;
+  tFase = millis();
+  M5StamPLC.noTone();
+  M5StamPLC.setStatusLight(255, 0, 0);
+  avisof("ERRO: %s", msg);
+  relEvento("ERRO", ultCodigo, msg);
+}
+
 // Carrega/salva horarios da sirene em formato "HH:MM,HH:MM,HH:MM"
 static void sireneSerializa(char* out, size_t n) {
   snprintf(out, n, "%02d:%02d,%02d:%02d,%02d:%02d",
@@ -492,13 +509,16 @@ static void pararTudo() {
   erroMsg = "";
   M5StamPLC.setStatusLight(0, 0, 0);
   temBase = false;
-  if (haviaCodigo && online) {
+  cicloMix = 0;
+  estLimpa = LIMP_PEDIR;
+  limpTentativas = 0;
+  tFase = millis();
+  if (haviaCodigo) {
     avisof("Parado - apagando codigo");
     relEvento("CANCELADO");
-    fase = LIMPANDO;
-    tLimpar = 0;  // dispara a primeira tentativa agora
+    fase = LIMPANDO;  // mesmo offline: LIMPANDO tenta e desiste depois
+    tLimpar = 0;
   } else {
-    if (haviaCodigo) { avisof("Parado manualmente"); relEvento("CANCELADO"); }
     fase = OCIOSO;
   }
 }
@@ -535,6 +555,10 @@ void setup() {
   String sirStr = prefs.getString("sirHor", SIRENE_HORARIOS_PADRAO);
   sireneParseia(sirStr.c_str());
   tBoot = millis();
+  // Baseline das entradas para nao ter borda de subida fantasma no boot
+  in2Anterior = M5StamPLC.readPlcInput(MODO_MANUAL_BOTAO_IN);
+  esteiraLigada = esteiraCand = (esteiraEntrada >= 0)
+    ? (M5StamPLC.readPlcInput(esteiraEntrada) == esteiraAlto) : false;
   // Mensagem no display durante o boot: senao fica preto esperando DHCP
   {
     auto& d = M5StamPLC.Display();
@@ -716,18 +740,20 @@ void loop() {
 
   // Maquina de estados do ciclo da esteira
   unsigned long dt = millis() - tFase;
-  // ERRO auto-recupera em 5s (apaga codigo e volta pro OCIOSO sem precisar de operador)
-  if (fase == ERRO && dt >= 5000) {
+  // ERRO auto-recupera em ERRO_RESET_MS. SEMPRE vai pro LIMPANDO (que tem contador
+  // de tentativas): apaga codigo da impressora e volta pro OCIOSO - operador vai
+  // ser forcado a ler codigo novo. Operador NAO tem acesso ao PLC, entao erro
+  // NUNCA pode impedir ele de trabalhar.
+  if (fase == ERRO && dt >= ERRO_RESET_MS) {
     avisof("Erro resolvido automaticamente - apagando codigo");
     falhaLimpeza = false;
     M5StamPLC.setStatusLight(0, 0, 0);
     temBase = false;
-    if (online) {
-      fase = LIMPANDO;
-      tLimpar = 0;
-    } else {
-      fase = OCIOSO;
-    }
+    estLimpa = LIMP_PEDIR;
+    limpTentativas = 0;
+    fase = LIMPANDO;
+    tLimpar = 0;  // dispara primeira tentativa agora
+    tFase = millis();
   }
   switch (fase) {
     case PRE_PARA_PULSA:  // esteira estava ligada antes de ler o codigo: pulsa para PARAR
@@ -744,11 +770,7 @@ void loop() {
         fase = PULSA_LIGA;
         tFase = millis();
       } else if (dt >= AGUARDA_MS) {
-        fase = ERRO;
-        erroMsg = "Esteira nao parou (pre-ciclo)";
-        avisof("ERRO: esteira nao parou");
-        relEvento("ERRO", ultCodigo, "pre-ciclo nao parou");
-        M5StamPLC.setStatusLight(255, 0, 0);
+        irParaErro("Esteira nao parou (pre-ciclo)");
       }
       break;
     case PULSA_LIGA:  // rele fechado para dar o clique de LIGAR
@@ -765,11 +787,7 @@ void loop() {
         fase = RODANDO;
         tFase = millis();
       } else if (dt >= AGUARDA_MS) {
-        fase = ERRO;
-        erroMsg = "Esteira nao ligou (sem 24V na IN1)";
-        avisof("ERRO: esteira nao ligou");
-        relEvento("ERRO", ultCodigo, "nao ligou");
-        M5StamPLC.setStatusLight(255, 0, 0);
+        irParaErro("Esteira nao ligou (sem 24V na IN1)");
       }
       break;
     case RODANDO:  // esteira trabalhando; cronometra ate dar o tempo configurado
@@ -868,23 +886,42 @@ void loop() {
         avisof("Esteira parou - pronto");
         relEvento("PRONTO_APOS_FORCADO");
         temBase = false;
+        cicloMix = 0;
         fase = OCIOSO;
+      } else if (dt >= TEMPO_MAX_FASE_MS) {
+        // teto global: nao fica preso esperando esteira cair pra sempre
+        irParaErro("Esteira travou - LED nunca caiu");
       }
       break;
     default:
       break;
   }
 
-  // Limpeza do codigo: faz 1 passo por segundo e nao bloqueia o loop
-  static enum { LIMP_PEDIR, LIMP_ESPERAR } estLimpa = LIMP_PEDIR;
+  // Limpeza do codigo: faz 1 passo a cada 500ms, com teto de tentativas pra
+  // nao travar o PLC se a impressora estiver offline. Esgotou -> forca OCIOSO
+  // (operador vai ler codigo novo e esse ciclo volta a tentar apagar na proxima leitura).
   if (fase == LIMPANDO && millis() - tLimpar >= 500) {
     tLimpar = millis();
     if (estLimpa == LIMP_PEDIR) {
-      if (pedirLimparCodigo()) estLimpa = LIMP_ESPERAR;
-      else {
-        if (!falhaLimpeza) { avisof("NAO apagou; vou insistir"); relEvento("FALHA_APAGAR"); }
+      limpTentativas++;
+      if (pedirLimparCodigo()) {
+        estLimpa = LIMP_ESPERAR;
+      } else {
+        if (!falhaLimpeza) { avisof("Nao apagou; insistindo (%d/%d)", limpTentativas, LIMPANDO_MAX_TENTATIVAS); relEvento("FALHA_APAGAR"); }
         falhaLimpeza = true;
         M5StamPLC.setStatusLight(255, 0, 0);
+        if (limpTentativas >= LIMPANDO_MAX_TENTATIVAS) {
+          avisof("Desisti de apagar - forcando OCIOSO");
+          relEvento("NAO_LIMPOU", ultCodigo, "impressora nao respondeu");
+          falhaLimpeza = false;
+          M5StamPLC.setStatusLight(0, 0, 0);
+          temBase = false;
+          fase = OCIOSO;
+          estLimpa = LIMP_PEDIR;
+          limpTentativas = 0;
+          tMostraFim = millis();
+          cicloMix = 0;
+        }
       }
     } else if (jaLimpou()) {
       avisof("Codigo apagado");
@@ -894,6 +931,7 @@ void loop() {
       temBase = false;
       fase = OCIOSO;
       estLimpa = LIMP_PEDIR;
+      limpTentativas = 0;
       tMostraFim = millis();  // mostra "FIM DE CICLO" por 3s na tela
       cicloMix = 0;
     }
@@ -922,20 +960,22 @@ void loop() {
         escreverBobina(24, true);
         Serial.println("[CFG] habilitou cache mode e SN enable");
         // Ponto 1: apaga codigo residual na primeira conexao (evita disparar ciclo
-        // no boot quando ja tinha codigo na impressora)
-        if (APAGA_AO_CONECTAR) {
+        // no boot quando ja tinha codigo na impressora). Mas SO se estiver ocioso -
+        // nao apagar codigo valido durante um ciclo em andamento (caso impressora
+        // caia e volte no meio).
+        if (APAGA_AO_CONECTAR && fase == OCIOSO) {
           logf("Apagando codigo residual (boot)...");
           recarregarTemplate();
           temBase = false;  // forca re-baseline apos limpar
         }
       }
       ultimoSnap = tmp;
-      // SCANNER UNIVERSAL: varre varias faixas de registros procurando MUDANCAS
-      // Ignora registros que naturalmente oscilam (tempo, temperatura, viscosidade)
+#if DEBUG_SCANNER_MODBUS
+      // SCANNER UNIVERSAL (debug): varre varias faixas de registros procurando MUDANCAS.
+      // So ativar em bancada - cada passo adiciona uma leitura Modbus pesada ao loop.
       {
-        // armazena ate 500 registros de cada tipo
         static uint16_t snapIn[500] = {0}, snapHold[500] = {0};
-        static int sweepBase = 0;  // offset de 100 em 100
+        static int sweepBase = 0;
         static int sweepTipo = 0;  // 0=input, 1=holding
         static bool primeira = true;
         uint16_t buf[100];
@@ -944,7 +984,6 @@ void loop() {
           if (sweepTipo == 0 && lerRegs(4, base, 100, buf)) {
             for (int i = 0; i < 100; i++) {
               int addr = base + i;
-              // ignora addr que oscila natural: viscosidade, temperaturas, tempo
               bool skip = (addr >= 5 && addr <= 7) || (addr >= 13 && addr <= 18);
               if (!primeira && !skip && buf[i] != snapIn[addr]) {
                 char c = buf[i] & 0xFF;
@@ -956,7 +995,7 @@ void loop() {
           } else if (sweepTipo == 1 && lerRegs(3, base, 100, buf)) {
             for (int i = 0; i < 100; i++) {
               int addr = base + i;
-              bool skip = (addr == 58 || addr == 59);  // relogio
+              bool skip = (addr == 58 || addr == 59);
               if (!primeira && !skip && buf[i] != snapHold[addr]) {
                 char c = buf[i] & 0xFF;
                 Serial.printf("[H] 4x%04d: %u -> %u (0x%04X %c)\r\n",
@@ -967,15 +1006,9 @@ void loop() {
           }
         }
         sweepTipo++;
-        if (sweepTipo >= 2) {
-          sweepTipo = 0;
-          sweepBase++;
-          if (sweepBase >= 5) {  // 0..4 = varre 0..499
-            sweepBase = 0;
-            primeira = false;
-          }
-        }
+        if (sweepTipo >= 2) { sweepTipo = 0; sweepBase++; if (sweepBase >= 5) { sweepBase = 0; primeira = false; } }
       }
+#endif
       if (!temBase) { base = tmp; temBase = true; }
       else {
         if (strcmp(tmp.texto, base.texto)) logf("texto: [%s] -> [%s]", base.texto, tmp.texto);
