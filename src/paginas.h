@@ -171,8 +171,13 @@ static void paginaPainel(EthernetClient& c) {
 
   c.printf("<h1>Tempo do rele</h1><div class='card' style='display:flex;align-items:center;gap:10px;flex-wrap:wrap'>"
            "<span>Esteira roda por <b style='font-size:24px'>%.0f min</b></span>"
-           "<a class='btn sec' href='/tempo?v=menos'>&minus; 1 min</a><a class='btn sec' href='/tempo?v=mais'>+ 1 min</a></div>",
-           esteiraSegMs / 60000.0);
+           "<a class='btn sec' href='/tempo?v=menos'>&minus; 1 min</a><a class='btn sec' href='/tempo?v=mais'>+ 1 min</a></div>"
+           "<p class='nota'>MIX A = <b>%.0f min</b> &middot; MIX B = <b>%.0f min</b> &middot; sem MIX = <b>%.0f min</b> (padrao). Modo: <b>%s</b>%s%s</p>",
+           esteiraSegMs / 60000.0,
+           tempoMixAMs / 60000.0, tempoMixBMs / 60000.0, esteiraSegMs / 60000.0,
+           modoManual ? "MANUAL" : "AUTO",
+           sireneAtiva ? " &middot; <b style='color:#c00'>SIRENE ATIVA</b>" : "",
+           encoderFimHabilitado ? " &middot; encoder habilitado" : "");
   c.print("<h1>Reles</h1><div class='rel'>");
   for (int i = 0; i < 4; i++)
     c.printf("<div class='%s'>R%d<small>%s</small></div>", relEst[i] ? "on" : "", i + 1, relEst[i] ? "FECHADO" : "aberto");
@@ -308,10 +313,32 @@ static void paginaConfig(EthernetClient& c, const char* erro, const char* sucess
            "<option value='1'%s>Com tensao = esteira ligada</option><option value='0'%s>Sem tensao = esteira ligada</option></select>"
            "<h1>Rede</h1><label>IP da impressora</label><input name='pip' value='%s'>"
            "<label>IP deste equipamento (StamPLC)</label><input name='ip' value='%s'>"
-           "<label>Gateway</label><input name='gw' value='%s'>"
-           "<p><button class='btn'>Salvar e reiniciar</button></p></form>",
+           "<label>Gateway</label><input name='gw' value='%s'>",
            esteiraAlto ? " selected" : "", esteiraAlto ? "" : " selected",
            ipImpressora.toString().c_str(), ipLocal.toString().c_str(), ipGw.toString().c_str());
+  // Receitas MIX A/B (ponto 3)
+  c.printf("<h1>Receitas MIX</h1>"
+           "<label>Tempo MIX A (minutos)</label><input name='mixa' value='%.0f'>"
+           "<label>Tempo MIX B (minutos)</label><input name='mixb' value='%.0f'>"
+           "<p class='nota'>Quando o codigo lido contem \"MIX A\" ou \"MIX B\", o PLC usa estes tempos no lugar do padrao.</p>",
+           tempoMixAMs / 60000.0, tempoMixBMs / 60000.0);
+  // Modo manual (ponto 5)
+  c.printf("<h1>Modo de operacao</h1>"
+           "<label><input type='checkbox' name='manual' value='1'%s> Modo manual (botao externo na IN%d pulsa o rele; ignora leitura da impressora)</label>",
+           modoManual ? " checked" : "", MODO_MANUAL_BOTAO_IN + 1);
+  // Sirene limpeza (ponto 4)
+  char sirStr[32]; sireneSerializa(sirStr, sizeof sirStr);
+  c.printf("<h1>Sirene de limpeza do cabecote</h1>"
+           "<label><input type='checkbox' name='sirH' value='1'%s> Habilitar sirene (R%d)</label>"
+           "<label>Horarios (HH:MM,HH:MM,HH:MM)</label><input name='sirHor' value='%s'>"
+           "<p class='nota'>No horario, R%d liga e so desliga quando o operador abrir e fechar a tampa do cabecote (1x0018).</p>",
+           sireneHabilitada ? " checked" : "", SIRENE_CANAL + 1, sirStr, SIRENE_CANAL + 1);
+  // Encoder (ponto 6)
+  c.printf("<h1>Fim de ciclo por encoder</h1>"
+           "<label><input type='checkbox' name='encF' value='1'%s> Finalizar ciclo quando contador 4x0061 parar de subir por %u s</label>"
+           "<p class='nota'>Desligado = ciclo so termina pelo tempo configurado. Ligado = termina antes se a borracha acabar.</p>",
+           encoderFimHabilitado ? " checked" : "", (unsigned)(ENCODER_PARADO_MS / 1000));
+  c.print("<p><button class='btn'>Salvar e reiniciar</button></p></form>");
   char d[16], h[10];
   carimbo(d, h);
   c.printf("<h1>Hora do equipamento</h1><p>Agora: <b>%s %s</b></p>", horaOk ? d : "(nao acertada)", h);
@@ -403,6 +430,21 @@ static void atendeWeb() {
       prefs.putInt("eent", eent);
       prefs.putBool("ealto", param(q, "ealto") != "0");
       prefs.putUInt("esper", (uint32_t)espms);
+      // Ponto 3 - MIX A/B
+      String mixaStr = param(q, "mixa"); mixaStr.replace(",", ".");
+      String mixbStr = param(q, "mixb"); mixbStr.replace(",", ".");
+      long mixaMs = lround(mixaStr.toFloat() * 60000.0f);
+      long mixbMs = lround(mixbStr.toFloat() * 60000.0f);
+      if (mixaMs >= 60000 && mixaMs <= 36000000L) prefs.putUInt("mixa", (uint32_t)mixaMs);
+      if (mixbMs >= 60000 && mixbMs <= 36000000L) prefs.putUInt("mixb", (uint32_t)mixbMs);
+      // Ponto 5 - modo manual
+      prefs.putBool("manual", param(q, "manual") == "1");
+      // Ponto 4 - sirene
+      prefs.putBool("sirH", param(q, "sirH") == "1");
+      String sirHor = param(q, "sirHor");
+      if (sirHor.length() >= 5 && sirHor.length() <= 24) prefs.putString("sirHor", sirHor);
+      // Ponto 6 - encoder
+      prefs.putBool("encF", param(q, "encF") == "1");
       abre(c, "config", "Salvo");
       c.printf("<h1>Salvo</h1><p>O equipamento esta reiniciando. Em cerca de 10 segundos voce sera levado para "
                "<b>http://%s/</b>.</p><script>setTimeout(function(){location='http://%s/'},12000)</script>",

@@ -119,6 +119,18 @@ static bool lerBit(uint8_t fc, uint16_t addr, bool& v) {  // fc 1 (bobina) ou 2 
   return true;
 }
 
+// Le varios bits de uma vez (ate 256). fc=1 bobinas, fc=2 discrete inputs.
+static bool lerBits(uint8_t fc, uint16_t addr, uint16_t qty, bool* out) {
+  if (qty > 256) qty = 256;
+  uint8_t pdu[5] = {fc, uint8_t(addr >> 8), uint8_t(addr), uint8_t(qty >> 8), uint8_t(qty)};
+  uint8_t r[64];
+  size_t rl;
+  size_t need = (qty + 7) / 8;
+  if (!mbTransacao(pdu, 5, r, rl) || rl < 2 + need) return false;
+  for (uint16_t i = 0; i < qty; i++) out[i] = (r[2 + i / 8] >> (i % 8)) & 1;
+  return true;
+}
+
 static bool escreverBobina(uint16_t addr, bool on) {
   uint8_t pdu[5] = {0x05, uint8_t(addr >> 8), uint8_t(addr), uint8_t(on ? 0xFF : 0), 0};
   uint8_t r[16];
@@ -198,6 +210,7 @@ struct Snap {
   char texto[50] = "";
   char sn[20] = "";  // 4x1001-1014 = Serial Number (14 chars) - onde o leitor pode gravar
   bool pronta = false, alarme = false;
+  bool coverOpen = false;  // 1x0018 - tampa do cabecote aberta
 };
 
 // Round-robin: 1 chamada Modbus por iteracao, para nao travar o loop.
@@ -239,17 +252,12 @@ static bool lerSnapEtapa(Snap& s, int& passo, bool& ciclado) {
       ciclado = true;
       return true;
     }
-    case 2: {  // alarme (1x0001). Nao bloqueia o gatilho.
-      bool v;
-      if (!lerBit(2, 0, v)) { passo = 1; return false; }
-      s.alarme = v;
-      passo = 3;
-      return true;
-    }
-    case 3: {  // pronta (1x0100)
-      bool v;
-      if (!lerBit(2, 99, v)) { passo = 1; return false; }
-      s.pronta = v;
+    case 2: {  // alarme (1x0001) + tampa (1x0018) + pronta (1x0100) em uma leitura so
+      bool bits[100];
+      if (!lerBits(2, 0, 100, bits)) { passo = 1; return false; }
+      s.alarme = bits[0];       // 1x0001
+      s.coverOpen = bits[17];   // 1x0018 - cabecote aberto
+      s.pronta = bits[99];      // 1x0100
       passo = 4;
       return true;
     }
@@ -308,6 +316,23 @@ static bool jaLimpou() {
   return !v;
 }
 
+// ---- Deteccao MIX A/B no texto do codigo (ponto 3) ---------------------
+// Procura "MIX A" ou "MIX B" (case-insensitive, aceita " MIXA"/"MIXB" tambem).
+static char detectaMix(const char* texto) {
+  if (!texto || !*texto) return 0;
+  char up[64];
+  int n = 0;
+  for (int i = 0; texto[i] && n < 63; i++) {
+    char c = texto[i];
+    up[n++] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
+  }
+  up[n] = 0;
+  // procura MIX A, MIX_A, MIXA e idem B
+  if (strstr(up, "MIX A") || strstr(up, "MIXA")) return 'A';
+  if (strstr(up, "MIX B") || strstr(up, "MIXB")) return 'B';
+  return 0;
+}
+
 // ---- Rele --------------------------------------------------------------
 static bool releLigado = false;
 static bool esteiraLigada = false, esteiraCand = false;
@@ -350,23 +375,90 @@ static bool usaDhcp = false;  // true = pega IP automatico do roteador
 static uint32_t esperaRetomarMs = 60000;  // quanto esperar pelo operador religar a esteira (padrao 1 min)
 static uint32_t tempoRestanteMs = 0;      // o que falta do RODANDO quando pausa
 
+// ---- Receitas MIX A / MIX B (ponto 3) --------------------------------
+static uint32_t tempoMixAMs = TEMPO_MIX_A_MS;
+static uint32_t tempoMixBMs = TEMPO_MIX_B_MS;
+static uint32_t cicloTempoMs = RELE_TEMPO_MS;  // tempo do ciclo em andamento (depende do mix)
+static char cicloMix = 0;                      // 'A', 'B' ou 0
+
+// ---- Grace period boot (ponto 1) -------------------------------------
+static unsigned long tBoot = 0;
+
+// ---- Modo manual (ponto 5) -------------------------------------------
+static bool modoManual = false;
+static bool in2Anterior = false;
+static unsigned long tPulsoManual = 0;
+
+// ---- Sirene limpeza (ponto 4) ----------------------------------------
+static bool sireneHabilitada = SIRENE_LIMPEZA_HABILITADO;
+static int sireneHoras[3] = {8, 13, 18};
+static int sireneMinutos[3] = {0, 0, 0};
+static bool sireneAtiva = false;
+static bool sireneDisparadoHoje[3] = {false, false, false};
+static int sireneUltDia = -1;
+static bool tampaAnterior = false;
+static bool sireneTampaFoiAberta = false;  // na janela atual
+
+// ---- Encoder/contador (ponto 6) --------------------------------------
+static bool encoderFimHabilitado = ENCODER_FIM_HABILITADO;
+static uint32_t encoderUltContador = 0;
+static unsigned long tUltMudouContador = 0;
+static unsigned long tLogContador = 0;
+
+// Carrega/salva horarios da sirene em formato "HH:MM,HH:MM,HH:MM"
+static void sireneSerializa(char* out, size_t n) {
+  snprintf(out, n, "%02d:%02d,%02d:%02d,%02d:%02d",
+           sireneHoras[0], sireneMinutos[0],
+           sireneHoras[1], sireneMinutos[1],
+           sireneHoras[2], sireneMinutos[2]);
+}
+static void sireneParseia(const char* s) {
+  int h, m, k = 0;
+  while (*s && k < 3) {
+    while (*s == ' ' || *s == ',') s++;
+    if (sscanf(s, "%d:%d", &h, &m) == 2) {
+      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+        sireneHoras[k] = h; sireneMinutos[k] = m; k++;
+      }
+    }
+    while (*s && *s != ',') s++;
+  }
+}
+
 #include "tela.h"
 #include "paginas.h"
 
 // ---- Maquina de estados -------------------------------------------------
 // Chamado quando um codigo foi lido pela impressora (ou botao de teste)
 static void disparar(const char* motivo, const char* codigo) {
-  relEvento("CODIGO", codigo, motivo);
+  // Modo manual ignora disparos automaticos da impressora (ponto 5)
+  if (modoManual && strcmp(motivo, "botao B") != 0 && strcmp(motivo, "botao B apos erro") != 0) {
+    logf("Ignorado (modo manual): %s %s", motivo, codigo);
+    return;
+  }
+  // Determina tempo do ciclo pelo MIX detectado no texto (ponto 3)
+  cicloMix = MIX_RECIPE_HABILITADO ? detectaMix(codigo) : 0;
+  if (cicloMix == 'A') cicloTempoMs = tempoMixAMs;
+  else if (cicloMix == 'B') cicloTempoMs = tempoMixBMs;
+  else cicloTempoMs = esteiraSegMs;
+
+  char det[32];
+  if (cicloMix) snprintf(det, sizeof det, "%s MIX_%c %umin", motivo, cicloMix, (unsigned)(cicloTempoMs / 60000));
+  else snprintf(det, sizeof det, "%s %umin", motivo, (unsigned)(cicloTempoMs / 60000));
+  relEvento("CODIGO", codigo, det);
   disparos++;
   falhaLimpeza = false;
   snprintf(ultCodigo, sizeof ultCodigo, "%s", codigo);
   char d[16];
   carimbo(d, ultHora);
-  avisof("Codigo lido: %s", codigo);
-  logf("DISPARO (%s) -> inicia ciclo", motivo);
+  if (cicloMix) avisof("Codigo (MIX %c): %s", cicloMix, codigo);
+  else avisof("Codigo lido: %s", codigo);
+  logf("DISPARO (%s) -> ciclo %u min", motivo, (unsigned)(cicloTempoMs / 60000));
   // Se a esteira ja esta rodando, para ela antes para garantir ciclo cheio
   rele(true);
   tFase = millis();
+  encoderUltContador = ultimoSnap.contador;
+  tUltMudouContador = millis();
   if (esteiraLigada) {
     avisof("Esteira ja rodando: parando antes");
     fase = PRE_PARA_PULSA;
@@ -431,6 +523,14 @@ void setup() {
   esteiraAlto = prefs.getBool("ealto", ESTEIRA_ATIVO_ALTO);
   usaDhcp = prefs.getBool("dhcp", false);
   esperaRetomarMs = prefs.getUInt("esper", 60000);  // 1 min por padrao
+  tempoMixAMs = prefs.getUInt("mixa", TEMPO_MIX_A_MS);
+  tempoMixBMs = prefs.getUInt("mixb", TEMPO_MIX_B_MS);
+  modoManual = prefs.getBool("manual", false);
+  sireneHabilitada = prefs.getBool("sirH", SIRENE_LIMPEZA_HABILITADO);
+  encoderFimHabilitado = prefs.getBool("encF", ENCODER_FIM_HABILITADO);
+  String sirStr = prefs.getString("sirHor", SIRENE_HORARIOS_PADRAO);
+  sireneParseia(sirStr.c_str());
+  tBoot = millis();
   // Mensagem no display durante o boot: senao fica preto esperando DHCP
   {
     auto& d = M5StamPLC.Display();
@@ -467,9 +567,86 @@ void setup() {
   if (Ethernet.linkStatus() == LinkOFF) logf("Cabo de rede desconectado");
 }
 
+// ---- Modo manual: IN2 pulsa o rele (ponto 5) --------------------------
+static void processaModoManual() {
+  if (!MODO_MANUAL_HABILITADO || !modoManual) return;
+  bool btn = M5StamPLC.readPlcInput(MODO_MANUAL_BOTAO_IN);
+  if (btn && !in2Anterior) {  // borda de subida
+    logf("Manual: botao pressionado - pulsando rele");
+    relEvento("MANUAL_PULSO");
+    rele(true);
+    tPulsoManual = millis();
+  }
+  if (releLigado && tPulsoManual && millis() - tPulsoManual >= PULSO_MS && fase == OCIOSO) {
+    rele(false);
+    tPulsoManual = 0;
+  }
+  in2Anterior = btn;
+}
+
+// ---- Sirene de limpeza (ponto 4) --------------------------------------
+// Em cada horario, liga R2 ate o operador abrir+fechar a tampa do cabecote.
+static void processaSirene() {
+  if (!sireneHabilitada || !horaOk) return;
+  time_t n = time(nullptr);
+  struct tm t;
+  localtime_r(&n, &t);
+  if (sireneUltDia != t.tm_mday) {
+    sireneUltDia = t.tm_mday;
+    for (int i = 0; i < 3; i++) sireneDisparadoHoje[i] = false;
+    logf("Novo dia - sirene resetada");
+  }
+  int minHoje = t.tm_hour * 60 + t.tm_min;
+  // dispara ao atingir qualquer horario cadastrado
+  for (int i = 0; i < 3; i++) {
+    int minHorario = sireneHoras[i] * 60 + sireneMinutos[i];
+    if (!sireneDisparadoHoje[i] && minHoje >= minHorario && minHoje < minHorario + 60) {
+      sireneDisparadoHoje[i] = true;
+      sireneAtiva = true;
+      sireneTampaFoiAberta = false;
+      avisof("SIRENE - hora de limpar cabecote (%02d:%02d)", sireneHoras[i], sireneMinutos[i]);
+      relEvento("SIRENE_LIGADA", "", "hora limpeza");
+    }
+  }
+  // detecta tampa aberta/fechada
+  bool tampa = ultimoSnap.coverOpen;
+  if (tampa && !tampaAnterior) {
+    if (sireneAtiva) sireneTampaFoiAberta = true;
+    logf("Tampa do cabecote ABERTA");
+  } else if (!tampa && tampaAnterior) {
+    logf("Tampa do cabecote FECHADA");
+    if (sireneAtiva && sireneTampaFoiAberta) {
+      sireneAtiva = false;
+      sireneTampaFoiAberta = false;
+      avisof("Cabecote limpo - sirene desligada");
+      relEvento("SIRENE_DESLIGADA", "", "tampa fechada");
+    }
+  }
+  tampaAnterior = tampa;
+  static bool sireneReleAnterior = false;
+  if (sireneAtiva != sireneReleAnterior) {
+    M5StamPLC.writePlcRelay(SIRENE_CANAL, sireneAtiva);
+    sireneReleAnterior = sireneAtiva;
+  }
+}
+
+// ---- Log do contador 4x0061 (ponto 6 - fase observacao) ---------------
+static void processaLogContador() {
+  if (!online) return;
+  if (millis() - tLogContador < (uint32_t)ENCODER_LOG_INTERVAL_S * 1000) return;
+  tLogContador = millis();
+  bool rodando = fase == RODANDO || fase == PAUSADA;
+  char det[48];
+  snprintf(det, sizeof det, "cont=%lu %s", (unsigned long)ultimoSnap.contador, rodando ? "ciclo" : "ocioso");
+  relEvento("CONTADOR", "", det);
+}
+
 void loop() {
   M5StamPLC.update();
   atendeWeb();
+  processaModoManual();
+  processaSirene();
+  processaLogContador();
 
   // A = proxima tela | B = testar (ou +tempo) | C = parar (ou -tempo). Rodape da tela mostra o que vale.
   static unsigned long tBotao = 0;
@@ -579,7 +756,8 @@ void loop() {
       break;
     case AGUARDA_LIGA:  // espera o LED de 24V indicar que esteira ligou
       if (esteiraLigada) {
-        avisof("Esteira ligou; rodando %u min", (unsigned)esteiraSegMs / 60000);
+        avisof("Esteira ligou; rodando %u min%s", (unsigned)cicloTempoMs / 60000,
+               cicloMix == 'A' ? " (MIX A)" : cicloMix == 'B' ? " (MIX B)" : "");
         fase = RODANDO;
         tFase = millis();
       } else if (dt >= AGUARDA_MS) {
@@ -592,16 +770,28 @@ void loop() {
       break;
     case RODANDO:  // esteira trabalhando; cronometra ate dar o tempo configurado
       if (!esteiraLigada) {  // esteira parou no meio - pausa o ciclo e aguarda operador religar
-        tempoRestanteMs = (dt >= esteiraSegMs) ? 0 : (esteiraSegMs - dt);
+        tempoRestanteMs = (dt >= cicloTempoMs) ? 0 : (cicloTempoMs - dt);
         avisof("Esteira parou - aguardando religar");
         relEvento("PAUSADA", ultCodigo, "aguardando operador");
         M5StamPLC.setStatusLight(255, 180, 0);  // amarelo
         fase = PAUSADA;
         tFase = millis();
-      } else if (dt >= esteiraSegMs) {
+      } else if (dt >= cicloTempoMs) {
         rele(true);  // pulso para PARAR
         fase = PULSA_PARA;
         tFase = millis();
+      } else if (encoderFimHabilitado && online && dt >= ENCODER_AQUECIMENTO_MS) {
+        // Ponto 6: se contador parou de subir por tempo X, finaliza ciclo
+        if (ultimoSnap.contador != encoderUltContador) {
+          encoderUltContador = ultimoSnap.contador;
+          tUltMudouContador = millis();
+        } else if (millis() - tUltMudouContador >= ENCODER_PARADO_MS) {
+          avisof("Encoder parado %us - finalizando ciclo", (unsigned)(ENCODER_PARADO_MS / 1000));
+          relEvento("FIM_POR_ENCODER", ultCodigo, "contador parou");
+          rele(true);
+          fase = PULSA_PARA;
+          tFase = millis();
+        }
       }
       break;
     case PAUSADA:  // esteira caiu no meio: operador tem esperaRetomarMs para religar
@@ -616,7 +806,7 @@ void loop() {
         M5StamPLC.setStatusLight(0, 255, 0);
         // volta pro RODANDO ajustando tFase para contar so o tempo restante
         fase = RODANDO;
-        tFase = millis() - (esteiraSegMs - tempoRestanteMs);
+        tFase = millis() - (cicloTempoMs - tempoRestanteMs);
       } else if (dt >= esperaRetomarMs) {
         M5StamPLC.noTone();
         avisof("Tempo esgotado - cancelando ciclo");
@@ -632,14 +822,14 @@ void loop() {
         tFase = millis();
       }
       break;
-    case AGUARDA_PARA:  // janela curta inicial: 2s
+    case AGUARDA_PARA:  // tolera ate TOLERANCIA_PARAR_MS (LED pode demorar pra cair)
       if (!esteiraLigada) {
         M5StamPLC.noTone();
         avisof("Esteira parou; apagando codigo");
         fase = LIMPANDO;
-      } else if (dt >= AGUARDA_MS) {
-        avisof("Esteira nao parou - insistindo com buzzer");
-        relEvento("PARA_INSISTE", ultCodigo, "esteira travada");
+      } else if (dt >= TOLERANCIA_PARAR_MS) {
+        avisof("Aguardando esteira cair - toca buzzer");
+        relEvento("AGUARDANDO_PARAR", ultCodigo, "LED ainda alto");
         M5StamPLC.setStatusLight(255, 180, 0);
         fase = PARA_INSISTE;
         tFase = millis();
@@ -725,6 +915,13 @@ void loop() {
         escreverBobina(2, true);
         escreverBobina(24, true);
         Serial.println("[CFG] habilitou cache mode e SN enable");
+        // Ponto 1: apaga codigo residual na primeira conexao (evita disparar ciclo
+        // no boot quando ja tinha codigo na impressora)
+        if (APAGA_AO_CONECTAR) {
+          logf("Apagando codigo residual (boot)...");
+          recarregarTemplate();
+          temBase = false;  // forca re-baseline apos limpar
+        }
       }
       ultimoSnap = tmp;
       // SCANNER UNIVERSAL: varre varias faixas de registros procurando MUDANCAS
@@ -777,7 +974,7 @@ void loop() {
       else {
         if (strcmp(tmp.texto, base.texto)) logf("texto: [%s] -> [%s]", base.texto, tmp.texto);
         if (tmp.alarme != base.alarme) { logf("ALARME: %d -> %d", base.alarme, tmp.alarme); relEvento("ALARME", "", tmp.alarme ? "ativo" : "normal"); }
-        if (fase == OCIOSO) {
+        if (fase == OCIOSO && (millis() - tBoot >= BOOT_GRACE_MS)) {
           bool porTexto = TRIGGER_TEXTO && tmp.texto[0] && strcmp(tmp.texto, base.texto) != 0;
           bool porCache = TRIGGER_CACHE && tmp.cache > base.cache;
           bool porContador = tmp.contador > base.contador;
