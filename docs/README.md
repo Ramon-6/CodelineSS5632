@@ -30,6 +30,8 @@ próxima vez.
    controle, impressão, template, callback
 5. [Lições aprendidas](05-licoes-aprendidas.md) — o que o manual não
    diz, o que é falso e como contornar
+6. [Ligação física](06-ligacao-fisica.md) — diagrama elétrico do painel
+   (fonte, relés, entradas, sirene, botão modo manual)
 
 ## Convenção de endereços
 
