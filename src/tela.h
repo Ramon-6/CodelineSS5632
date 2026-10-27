@@ -141,8 +141,8 @@ static void barraBase(M5Canvas& g) {
   g.setTextColor(C_TXT, cf);
   char a[20];
   snprintf(a, sizeof a, "A > %s", NOME_PAG[(pagina + 1) % N_PAG]);
-  const char* bb = pagina == 4 ? "B  + 0,5s" : "B Testar";
-  const char* cc = pagina == 4 ? "C  - 0,5s" : "C Parar";
+  const char* bb = pagina == 4 ? "B +1min (2s=modo)" : "B Testar";
+  const char* cc = pagina == 4 ? "C -1min" : "C Parar";
   g.setCursor(6, h - 18);
   g.print(a);
   g.setCursor((w - g.textWidth(bb)) / 2 + 10, h - 18);
@@ -334,13 +334,14 @@ static void telaAjustes(M5Canvas& g) {
   txt(g, 12, 100, "ORIGEM DA ESTEIRA", C_DIM, 24);
   g.setFont(&fonts::Font2);
   txt(g, 12, 110, esteiraDesc().c_str(), C_TXT, 32);
-  g.fillRoundRect(6, 122, w - 12, 18, 4, C_CARD);
+  // Linha do modo (MANUAL/AUTO) - trocado com B segurado 2s nesta pagina
+  g.fillRoundRect(6, 122, w - 12, 18, 4, modoManual ? C_WORKBG : C_OKBG);
   g.setFont(&fonts::Font0);
-  txt(g, 12, 125, "TOLERANCIA SE PARAR", C_DIM, 24);
-  char eb[16];
-  snprintf(eb, sizeof eb, "%u min", (unsigned)(esperaRetomarMs / 60000));
+  txt(g, 12, 125, "MODO (B 2s troca)", C_DIM, 24);
   g.setFont(&fonts::Font2);
-  txt(g, 130, 123, eb, C_TXT, 12);
+  g.setTextColor(modoManual ? C_WORK : C_OK, modoManual ? C_WORKBG : C_OKBG);
+  g.setCursor(130, 123);
+  g.print(modoManual ? "MANUAL" : "AUTO");
 }
 
 // Tela de operacao: fundo colorido por receita + tempo gigante.

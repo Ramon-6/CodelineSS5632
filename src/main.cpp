@@ -724,6 +724,18 @@ void loop() {
       ESP.restart();
     }
   }
+  // Pagina AJUSTES: B segurado 2s alterna modo MANUAL/AUTO
+  if (pagina == 4 && M5StamPLC.BtnB().pressedFor(2000)) {
+    static unsigned long tModo = 0;
+    if (millis() - tModo > 2500) {
+      tModo = millis();
+      modoManual = !modoManual;
+      prefs.putBool("manual", modoManual);
+      tSalvo = millis();
+      avisof("Modo: %s", modoManual ? "MANUAL" : "AUTO");
+      relEvento("MODO", "", modoManual ? "manual" : "auto");
+    }
+  }
   if (M5StamPLC.BtnB().wasPressed()) {
     botao = true;
     if (pagina == 4) {
