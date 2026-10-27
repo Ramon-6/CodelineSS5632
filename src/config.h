@@ -82,6 +82,9 @@
 #define SIRENE_LIMPEZA_HABILITADO 0
 #define SIRENE_CANAL              1       // R2
 #define SIRENE_HORARIOS_PADRAO    "07:00,16:00,00:00"
+// Tempo minimo que a tampa precisa ficar aberta pra considerar "limpou de verdade".
+// Protege contra operador que so encosta no fim de curso.
+#define SIRENE_TAMPA_MIN_ABERTA_MS 5000   // 5 s
 
 // ---- Encoder/contador 4x0061 (ponto 6) --------------------------------
 // Fase 1 (atual): so loga no CSV o valor do contador a cada N segundos.

@@ -396,7 +396,8 @@ static bool sireneAtiva = false;
 static bool sireneDisparadoHoje[3] = {false, false, false};
 static int sireneUltDia = -1;
 static bool tampaAnterior = false;
-static bool sireneTampaFoiAberta = false;  // na janela atual
+static unsigned long tTampaAbriu = 0;      // quando a tampa foi aberta nesta janela
+static bool sireneTampaValida = false;     // tampa aberta por >= SIRENE_TAMPA_MIN_ABERTA_MS
 
 // ---- Encoder/contador (ponto 6) --------------------------------------
 static bool encoderFimHabilitado = ENCODER_FIM_HABILITADO;
@@ -614,6 +615,9 @@ static void processaModoManual() {
 
 // ---- Sirene de limpeza (ponto 4) --------------------------------------
 // Em cada horario, liga R2 ate o operador abrir+fechar a tampa do cabecote.
+// Nao interrompe ciclo em andamento: so dispara quando fase == OCIOSO.
+// A tampa so vale como "limpou" se ficou aberta por SIRENE_TAMPA_MIN_ABERTA_MS
+// (protege contra operador que so encosta no fim de curso).
 static void processaSirene() {
   if (!sireneHabilitada || !horaOk) return;
   time_t n = time(nullptr);
@@ -625,29 +629,45 @@ static void processaSirene() {
     logf("Novo dia - sirene resetada");
   }
   int minHoje = t.tm_hour * 60 + t.tm_min;
-  // dispara ao atingir qualquer horario cadastrado
-  for (int i = 0; i < 3; i++) {
-    int minHorario = sireneHoras[i] * 60 + sireneMinutos[i];
-    if (!sireneDisparadoHoje[i] && minHoje >= minHorario && minHoje < minHorario + 60) {
-      sireneDisparadoHoje[i] = true;
-      sireneAtiva = true;
-      sireneTampaFoiAberta = false;
-      avisof("SIRENE - hora de limpar cabecote (%02d:%02d)", sireneHoras[i], sireneMinutos[i]);
-      relEvento("SIRENE_LIGADA", "", "hora limpeza");
+  // So dispara se ja estiver OCIOSO - respeita ciclo em andamento. Se chegou
+  // o horario mas ciclo esta rodando, fica aguardando o ciclo terminar e ai
+  // aciona (sireneDisparadoHoje continua false, loop pega na proxima iteracao).
+  if (fase == OCIOSO && !sireneAtiva) {
+    for (int i = 0; i < 3; i++) {
+      int minHorario = sireneHoras[i] * 60 + sireneMinutos[i];
+      // janela de 60 min: se perdeu a janela, nao dispara mais hoje
+      if (!sireneDisparadoHoje[i] && minHoje >= minHorario && minHoje < minHorario + 60) {
+        sireneDisparadoHoje[i] = true;
+        sireneAtiva = true;
+        sireneTampaValida = false;
+        tTampaAbriu = 0;
+        avisof("SIRENE - hora de limpar cabecote (%02d:%02d)", sireneHoras[i], sireneMinutos[i]);
+        relEvento("SIRENE_LIGADA", "", "hora limpeza");
+        break;
+      }
     }
   }
-  // detecta tampa aberta/fechada
+  // Detecta tampa aberta/fechada com debounce de SIRENE_TAMPA_MIN_ABERTA_MS
   bool tampa = ultimoSnap.coverOpen;
   if (tampa && !tampaAnterior) {
-    if (sireneAtiva) sireneTampaFoiAberta = true;
+    tTampaAbriu = millis();
+    sireneTampaValida = false;
     logf("Tampa do cabecote ABERTA");
+  } else if (tampa && !sireneTampaValida && tTampaAbriu &&
+             millis() - tTampaAbriu >= SIRENE_TAMPA_MIN_ABERTA_MS) {
+    sireneTampaValida = true;
+    logf("Tampa aberta ha %us - abertura valida", (unsigned)(SIRENE_TAMPA_MIN_ABERTA_MS / 1000));
   } else if (!tampa && tampaAnterior) {
     logf("Tampa do cabecote FECHADA");
-    if (sireneAtiva && sireneTampaFoiAberta) {
+    if (sireneAtiva && sireneTampaValida) {
       sireneAtiva = false;
-      sireneTampaFoiAberta = false;
+      sireneTampaValida = false;
+      tTampaAbriu = 0;
       avisof("Cabecote limpo - sirene desligada");
       relEvento("SIRENE_DESLIGADA", "", "tampa fechada");
+    } else if (sireneAtiva) {
+      avisof("Tampa encostada rapido - sirene continua");
+      relEvento("SIRENE_IGNORADA", "", "tampa < 5s");
     }
   }
   tampaAnterior = tampa;
