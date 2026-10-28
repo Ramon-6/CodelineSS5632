@@ -312,9 +312,11 @@ static void telaEventos(M5Canvas& g) {
 static void telaAjustes(M5Canvas& g) {
   int w = g.width();
   barraTopo(g, "AJUSTES");
-  g.fillRoundRect(6, 36, w - 12, 54, 8, C_CARD);
+
+  // Card principal: tempo padrao em destaque
+  g.fillRoundRect(6, 36, w - 12, 44, 6, C_CARD);
   g.setFont(&fonts::Font0);
-  txt(g, 12, 40, "TEMPO DA ESTEIRA RODANDO", C_DIM, 28);
+  txt(g, 12, 40, "TEMPO PADRAO (B+1 C-1)", C_DIM, 28);
   char b[24];
   snprintf(b, sizeof b, "%u min", (unsigned)esteiraSegMs / 60000);
   g.setFont(&fonts::Font6);
@@ -322,25 +324,33 @@ static void telaAjustes(M5Canvas& g) {
   g.setCursor(14, 50);
   g.print(b);
   if (millis() - tSalvo < 2000) {
-    g.fillRoundRect(w - 68, 44, 60, 20, 4, C_OKBG);
+    g.fillRoundRect(w - 60, 44, 54, 18, 3, C_OKBG);
     g.setFont(&fonts::Font2);
-    txt(g, w - 60, 46, "SALVO", C_OK, 6);
-  } else {
-    g.setFont(&fonts::Font0);
-    txt(g, w - 108, 68, "B = +1min  C = -1min", C_DIM, 24);
+    txt(g, w - 52, 45, "SALVO", C_OK, 6);
   }
-  g.fillRoundRect(6, 96, w - 12, 24, 6, C_CARD);
+
+  // Linha com MIX A e MIX B lado a lado
+  int mx = 6, mw = (w - 18) / 2;
+  g.fillRoundRect(mx, 84, mw, 20, 4, C_CARD);
   g.setFont(&fonts::Font0);
-  txt(g, 12, 100, "ORIGEM DA ESTEIRA", C_DIM, 24);
+  txt(g, mx + 6, 86, "MIX A", C_DIM, 20);
   g.setFont(&fonts::Font2);
-  txt(g, 12, 110, esteiraDesc().c_str(), C_TXT, 32);
-  // Linha do modo (MANUAL/AUTO) - trocado com B segurado 2s nesta pagina
-  g.fillRoundRect(6, 122, w - 12, 18, 4, modoManual ? C_WORKBG : C_OKBG);
+  char ma[16]; snprintf(ma, sizeof ma, "%umin", (unsigned)tempoMixAMs / 60000);
+  txt(g, mx + 44, 86, ma, C_TXT, 20);
+  g.fillRoundRect(mx + mw + 6, 84, mw, 20, 4, C_CARD);
   g.setFont(&fonts::Font0);
-  txt(g, 12, 125, "MODO (B 2s troca)", C_DIM, 24);
+  txt(g, mx + mw + 12, 86, "MIX B", C_DIM, 20);
+  g.setFont(&fonts::Font2);
+  char mb[16]; snprintf(mb, sizeof mb, "%umin", (unsigned)tempoMixBMs / 60000);
+  txt(g, mx + mw + 50, 86, mb, C_TXT, 20);
+
+  // Linha do modo (MANUAL/AUTO) - trocado com B segurado 2s nesta pagina
+  g.fillRoundRect(6, 108, w - 12, 20, 4, modoManual ? C_WORKBG : C_OKBG);
+  g.setFont(&fonts::Font0);
+  txt(g, 12, 111, "MODO (segure B 2s)", C_DIM, 24);
   g.setFont(&fonts::Font2);
   g.setTextColor(modoManual ? C_WORK : C_OK, modoManual ? C_WORKBG : C_OKBG);
-  g.setCursor(130, 123);
+  g.setCursor(140, 110);
   g.print(modoManual ? "MANUAL" : "AUTO");
 }
 

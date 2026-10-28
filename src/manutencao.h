@@ -35,6 +35,7 @@
 // ---- Interface implementada pelo main.cpp ----------------------------
 int manutencaoColetaStatus(char* buf, size_t n);
 void manutencaoDespejaLog(Client& c);
+int manutReleAciona(int canal, int op);  // op: 0=off 1=on 2=pulso
 
 // Ajustes rapidos (nao reiniciam o PLC)
 bool manutAjustaTempo(uint32_t ms);
@@ -139,72 +140,126 @@ static void rotaManutHTML(Client& c) {
   c.print(F(
     "<!doctype html><html><head><meta charset=utf-8>"
     "<meta name=viewport content='width=device-width,initial-scale=1'>"
-    "<title>Manutencao StamPLC</title>"
-    "<style>body{font:14px system-ui;margin:0;background:#111;color:#eee;padding:12px}"
-    "h1{font-size:16px;margin:4px 0 10px;color:#4af}"
-    ".k{color:#8aa;font-size:11px;text-transform:uppercase;letter-spacing:.4px}"
-    ".v{font-size:17px;font-weight:600;margin-bottom:4px;font-family:ui-monospace,monospace}"
-    ".c{background:#1c1f26;border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid #4af}"
-    ".c.ok{border-color:#4a4}.c.wk{border-color:#fa0}.c.er{border-color:#f44}"
-    ".row{display:flex;gap:8px;flex-wrap:wrap}.row>.c{flex:1 1 150px}"
-    "a.btn{display:inline-block;background:#4af;color:#000;text-decoration:none;padding:8px 14px;border-radius:6px;font-weight:600;margin:4px 4px 4px 0}"
-    "a.red{background:#f44;color:#fff}a.sec{background:#2a2d35;color:#eee}"
-    "pre{background:#0a0b0e;padding:10px;border-radius:6px;max-height:50vh;overflow:auto;font-size:12px;margin:0;white-space:pre-wrap}"
-    "</style></head><body>"
+    "<title>Batoff Manutencao</title>"
+    "<style>"
+    "*{box-sizing:border-box}"
+    "body{font:14px system-ui,-apple-system,sans-serif;margin:0;background:#0f0f0f;color:#d4d4d4}"
+    ".wrap{max-width:900px;margin:0 auto;padding:0 12px 40px}"
+    ".bar{background:#181818;border-bottom:2px solid #3ddc84;padding:10px 14px;margin:0 -12px 12px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:5;flex-wrap:wrap;gap:8px}"
+    ".bar h1{margin:0;font-size:15px;letter-spacing:2px;color:#3ddc84}"
+    ".bar .acts{display:flex;gap:6px;flex-wrap:wrap}"
+    "h2{color:#3ddc84;font-size:10px;letter-spacing:2px;margin:14px 0 6px;border-bottom:1px solid #303030;padding-bottom:4px}"
+    ".card{background:#181818;border:1px solid #303030;border-radius:6px;padding:10px 12px;margin-bottom:6px}"
+    ".card.hero{border-left:4px solid #3ddc84;padding:12px 14px}"
+    ".card.hero.wk{border-left-color:#e0d204}.card.hero.er{border-left-color:#f44}"
+    ".k{color:#888;font-size:10px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px}"
+    ".v{font-size:15px;font-weight:600;font-family:ui-monospace,SF Mono,monospace;color:#d4d4d4}"
+    ".v.big{font-size:22px}"
+    ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:6px}"
+    ".btn{display:inline-flex;align-items:center;justify-content:center;background:#303030;color:#d4d4d4;border:1px solid #303030;border-radius:5px;padding:7px 12px;font:600 13px system-ui;text-decoration:none;cursor:pointer;transition:all .1s}"
+    ".btn:hover{border-color:#3ddc84;color:#3ddc84}"
+    ".btn.pri{background:#3ddc84;color:#0f0f0f;border-color:#3ddc84;font-weight:700}"
+    ".btn.pri:hover{filter:brightness(1.15);color:#0f0f0f}"
+    ".btn.red{background:#f44;color:#fff;border-color:#f44}"
+    ".btn.red:hover{filter:brightness(1.1);color:#fff}"
+    ".btn.wk{background:#e0d204;color:#0f0f0f;border-color:#e0d204}"
     ".fld{display:flex;gap:6px;align-items:center;margin:4px 0;flex-wrap:wrap}"
-    ".fld label{min-width:90px;color:#8aa;font-size:12px}"
-    ".fld input,.fld select{background:#0a0b0e;color:#eee;border:1px solid #333;border-radius:5px;padding:5px 8px;font:13px ui-monospace,monospace;width:120px}"
-    ".fld button{background:#4af;color:#000;border:0;border-radius:5px;padding:5px 10px;font-weight:600;cursor:pointer}"
-    ".msg{color:#4a4;font-size:12px;margin-left:6px}.msg.err{color:#f44}"
-    "</style></head><body>"
-    "<h1>MANUTENCAO EM CAMPO</h1>"
-    "<div id=live>carregando...</div>"
-    "<p><a class=btn href='/'>Painel completo</a>"
-    "<a class='btn sec' href='/update'>Atualizar firmware</a>"
-    "<a class='btn red' href='/ap/off'>Desligar AP</a></p>"
+    ".fld label{min-width:100px;color:#888;font-size:12px;flex-shrink:0}"
+    ".fld input,.fld select{background:#0f0f0f;color:#d4d4d4;border:1px solid #303030;border-radius:4px;padding:5px 7px;font:13px ui-monospace,monospace;flex:0 1 140px}"
+    ".fld .unit{color:#888;font-size:11px;margin-left:-4px}"
+    ".msg{color:#3ddc84;font-size:11px;margin-left:4px}.msg.err{color:#f44}"
+    "pre{background:#0a0b0e;border:1px solid #303030;padding:8px;border-radius:4px;max-height:40vh;overflow:auto;font:11px/1.4 ui-monospace,monospace;margin:0;white-space:pre-wrap;color:#aaa}"
+    "@media(max-width:600px){.bar h1{font-size:13px;letter-spacing:1px}.btn{font-size:12px;padding:6px 9px}.fld label{min-width:85px;font-size:11px}}"
+    "</style></head><body><div class=wrap>"
 
-    "<h1>AJUSTES RAPIDOS</h1>"
-    "<div class=c>"
-    "<div class=fld><label>Tempo padrao</label><input id=i_tempo type=number min=60 max=36000 step=10><span>s</span><button onclick=\"sv('tempo',i_tempo.value)\">Aplicar</button><span id=m_tempo class=msg></span></div>"
-    "<div class=fld><label>MIX A</label><input id=i_mixa type=number min=60 max=36000 step=10><span>s</span><button onclick=\"sv('mixa',i_mixa.value)\">Aplicar</button><span id=m_mixa class=msg></span></div>"
-    "<div class=fld><label>MIX B</label><input id=i_mixb type=number min=60 max=36000 step=10><span>s</span><button onclick=\"sv('mixb',i_mixb.value)\">Aplicar</button><span id=m_mixb class=msg></span></div>"
-    "<div class=fld><label>Modo</label><select id=i_modo><option value=auto>AUTO</option><option value=manual>MANUAL</option></select><button onclick=\"sv('modo',i_modo.value)\">Aplicar</button><span id=m_modo class=msg></span></div>"
-    "<div class=fld><label>Sirene</label><select id=i_sir><option value=0>desligada</option><option value=1>habilitada</option></select><button onclick=\"sv('sirene',i_sir.value)\">Aplicar</button><span id=m_sirene class=msg></span></div>"
-    "<div class=fld><label>Horarios</label><input id=i_sirH style='width:200px' placeholder='07:00,16:00,00:00'><button onclick=\"sv('sirHor',i_sirH.value)\">Aplicar</button><span id=m_sirHor class=msg></span></div>"
-    "<div class=fld><label>Encoder fim</label><select id=i_encF><option value=0>observando</option><option value=1>ativo</option></select><button onclick=\"sv('encF',i_encF.value)\">Aplicar</button><span id=m_encF class=msg></span></div>"
-    "<div class=fld><label>Acao</label><button onclick=\"sv('acao','testar')\">TESTAR ciclo</button><button style='background:#f44;color:#fff' onclick=\"sv('acao','parar')\">PARAR</button><span id=m_acao class=msg></span></div>"
-    "</div>"
-
-    "<h1>MODBUS EXPLORER</h1>"
-    "<div class=c>"
-    "<div class=fld><label>FC</label><select id=mb_fc>"
-    "<option value=3>3 - holding read</option>"
-    "<option value=4>4 - input read</option>"
-    "<option value=1>1 - coils read</option>"
-    "<option value=2>2 - discrete read</option>"
-    "<option value=6>6 - holding write</option>"
-    "<option value=5>5 - coil write</option></select></div>"
-    "<div class=fld><label>Endereco</label><input id=mb_a type=number min=0 max=65535 value=200><label style='min-width:40px'>N/V</label><input id=mb_n type=number min=1 max=256 value=1><button onclick=mbgo()>Ler/Escrever</button></div>"
-    "<pre id=mb_out style='background:#0a0b0e;padding:10px;border-radius:6px;margin:4px 0;font-size:12px;max-height:200px;overflow:auto;white-space:pre-wrap'>-</pre>"
-    "<div style='font-size:11px;color:#8aa;line-height:1.6'>Enderecos uteis:"
-    " 4x0201=200 (texto scanner)"
-    " 3x0002=1 (dados em cache)"
-    " 4x0061=60 (encoder)"
-    " 1x0018=23 (tampa aberta)"
-    " 0x0002=1 (clear cache)"
+    "<div class=bar>"
+    "<h1>BATOFF &middot; MANUT</h1>"
+    "<div class=acts>"
+    "<a class=btn href='/'>Web completa</a>"
+    "<a class=btn href='/update'>Firmware</a>"
+    "<a class='btn red' href='/ap/off'>Desligar AP</a>"
     "</div></div>"
 
-    "<h1>LOG</h1><pre id=log>carregando...</pre>"
+    "<h2>ESTADO AO VIVO</h2>"
+    "<div id=live>carregando...</div>"
+    "<h2>ACAO DE CICLO</h2>"
+    "<div class=card><div class=fld style='gap:8px'>"
+    "<button class='btn pri' onclick=\"sv('acao','testar')\">TESTAR CICLO</button>"
+    "<button class='btn red' onclick=\"sv('acao','parar')\">PARAR CICLO</button>"
+    "<span id=m_acao class=msg></span></div></div>"
+
+    "<h2>TESTAR RELES</h2>"
+    "<div class=card>"
+    "<div class=fld><label>R1 Esteira</label>"
+      "<button class=btn onclick=\"rl(0,'pulso')\">PULSO 1s</button>"
+      "<button class=btn onclick=\"rl(0,'on')\">LIGA</button>"
+      "<button class=btn onclick=\"rl(0,'off')\">DESLIGA</button>"
+      "<span id=m_r0 class=msg></span></div>"
+    "<div class=fld><label>R2 Sirene</label>"
+      "<button class=btn onclick=\"rl(1,'pulso')\">PULSO 1s</button>"
+      "<button class='btn wk' onclick=\"rl(1,'on')\">LIGA</button>"
+      "<button class=btn onclick=\"rl(1,'off')\">DESLIGA</button>"
+      "<span id=m_r1 class=msg></span></div>"
+    "<div class=fld><label>R3 Livre</label>"
+      "<button class=btn onclick=\"rl(2,'pulso')\">PULSO</button>"
+      "<button class=btn onclick=\"rl(2,'on')\">LIGA</button>"
+      "<button class=btn onclick=\"rl(2,'off')\">DESLIGA</button>"
+      "<span id=m_r2 class=msg></span></div>"
+    "<div class=fld><label>R4 Livre</label>"
+      "<button class=btn onclick=\"rl(3,'pulso')\">PULSO</button>"
+      "<button class=btn onclick=\"rl(3,'on')\">LIGA</button>"
+      "<button class=btn onclick=\"rl(3,'off')\">DESLIGA</button>"
+      "<span id=m_r3 class=msg></span></div>"
+    "<div style='color:#888;font-size:10px;margin-top:4px'>R1 bloqueado durante ciclo. PULSO = 1s.</div>"
+    "</div>"
+
+    "<h2>TEMPOS</h2>"
+    "<div class=card>"
+    "<div class=fld><label>Padrao</label><input id=i_tempo type=number min=60 max=36000 step=10><span class=unit>s</span><button class=btn onclick=\"sv('tempo',i_tempo.value)\">Aplicar</button><span id=m_tempo class=msg></span></div>"
+    "<div class=fld><label>MIX A</label><input id=i_mixa type=number min=60 max=36000 step=10><span class=unit>s</span><button class=btn onclick=\"sv('mixa',i_mixa.value)\">Aplicar</button><span id=m_mixa class=msg></span></div>"
+    "<div class=fld><label>MIX B</label><input id=i_mixb type=number min=60 max=36000 step=10><span class=unit>s</span><button class=btn onclick=\"sv('mixb',i_mixb.value)\">Aplicar</button><span id=m_mixb class=msg></span></div>"
+    "</div>"
+
+    "<h2>MODO E AUTOMATICOS</h2>"
+    "<div class=card>"
+    "<div class=fld><label>Modo</label><select id=i_modo><option value=auto>AUTO</option><option value=manual>MANUAL</option></select><button class=btn onclick=\"sv('modo',i_modo.value)\">Aplicar</button><span id=m_modo class=msg></span></div>"
+    "<div class=fld><label>Sirene</label><select id=i_sir><option value=0>desligada</option><option value=1>habilitada</option></select><button class=btn onclick=\"sv('sirene',i_sir.value)\">Aplicar</button><span id=m_sirene class=msg></span></div>"
+    "<div class=fld><label>Horarios</label><input id=i_sirH style='flex:1 1 200px' placeholder='07:00,16:00,00:00'><button class=btn onclick=\"sv('sirHor',i_sirH.value)\">Aplicar</button><span id=m_sirHor class=msg></span></div>"
+    "<div class=fld><label>Encoder fim</label><select id=i_encF><option value=0>observando</option><option value=1>ativo</option></select><button class=btn onclick=\"sv('encF',i_encF.value)\">Aplicar</button><span id=m_encF class=msg></span></div>"
+    "</div>"
+
+    "<h2>MODBUS DA IMPRESSORA</h2>"
+    "<div class=card>"
+    "<div class=fld><label>Funcao</label><select id=mb_fc style='flex:1 1 220px'>"
+    "<option value=3>3 - holding read (4x)</option>"
+    "<option value=4>4 - input read (3x)</option>"
+    "<option value=1>1 - coils read (0x)</option>"
+    "<option value=2>2 - discrete read (1x)</option>"
+    "<option value=6>6 - holding write</option>"
+    "<option value=5>5 - coil write</option></select></div>"
+    "<div class=fld><label>Endereco</label><input id=mb_a type=number min=0 max=65535 value=200><label style='min-width:30px'>N/V</label><input id=mb_n type=number min=1 max=256 value=1><button class='btn pri' onclick=mbgo()>Executar</button></div>"
+    "<pre id=mb_out>-</pre>"
+    "<div style='font-size:10px;color:#888;line-height:1.6;margin-top:6px'>Uteis: 200=scanner | 1=cache | 60=encoder | 17=tampa | coil 2=clear</div>"
+    "</div>"
+
+    "<h2>LOG DO PLC</h2><pre id=log>carregando...</pre>"
 
     "<script>"
     "let primeiro=true;"
+    "function msg(id,txt,erro){"
+    " const el=document.getElementById(id); if(!el)return;"
+    " el.textContent=txt; el.className='msg'+(erro?' err':'');"
+    " setTimeout(()=>el.textContent='',3000);"
+    "}"
     "async function sv(k,v){"
-    " try{"
-    "  const r=await fetch('/set?'+k+'='+encodeURIComponent(v));"
-    "  const j=await r.json();"
-    "  const el=document.getElementById('m_'+k);"
-    "  if(el){el.textContent=j.msg;el.className='msg'+(j.ok?'':' err');setTimeout(()=>el.textContent='',3000);}"
-    " }catch(e){alert(e);}"
+    " try{const r=await fetch('/set?'+k+'='+encodeURIComponent(v));"
+    " const j=await r.json(); msg('m_'+k,j.msg,!j.ok);"
+    " }catch(e){msg('m_'+k,e,true);}"
+    "}"
+    "async function rl(n,op){"
+    " try{const r=await fetch('/rele?n='+n+'&v='+op);"
+    " const j=await r.json(); msg('m_r'+n,j.ok?('OK '+op):j.msg,!j.ok);"
+    " }catch(e){msg('m_r'+n,e,true);}"
     "}"
     "async function mbgo(){"
     " const fc=mb_fc.value,a=mb_a.value,n=mb_n.value;"
@@ -216,18 +271,18 @@ static void rotaManutHTML(Client& c) {
     "async function tick(){"
     " try{"
     "  const r=await fetch('/live.json'); const j=await r.json();"
-    "  const cls=j.fase=='ERRO'?'er':(j.fase=='OCIOSO'?'ok':'wk');"
+    "  const cls=j.fase=='ERRO'?'er':(j.fase=='OCIOSO'?'':'wk');"
     "  document.getElementById('live').innerHTML="
-    "   `<div class='c ${cls}'><div class=k>Fase</div><div class=v>${j.fase}</div></div>`+"
-    "   `<div class=row>"
-    "     <div class=c><div class=k>Codigo</div><div class=v>${j.codigo||'-'}</div></div>"
-    "     <div class=c><div class=k>Modo</div><div class=v>${j.modo}</div></div>"
-    "     <div class=c><div class=k>Tempo restante</div><div class=v>${j.tempo_restante_s}s</div></div>"
-    "     <div class=c><div class=k>Rele</div><div class=v>${j.rele?'ON':'OFF'}</div></div>"
-    "     <div class=c><div class=k>Esteira</div><div class=v>${j.esteira?'LIGADA':'parada'}</div></div>"
-    "     <div class=c><div class=k>Encoder</div><div class=v>${j.encoder}</div></div>"
-    "     <div class=c><div class=k>IP PLC</div><div class=v>${j.ip_plc}</div></div>"
-    "     <div class=c><div class=k>IP impr.</div><div class=v>${j.ip_impressora}</div></div>"
+    "   `<div class='card hero ${cls}'><div class=k>Fase</div><div class='v big'>${j.fase}</div></div>`+"
+    "   `<div class=grid>"
+    "     <div class=card><div class=k>Codigo</div><div class=v>${j.codigo||'-'}</div></div>"
+    "     <div class=card><div class=k>Modo</div><div class=v>${j.modo.toUpperCase()}</div></div>"
+    "     <div class=card><div class=k>Tempo</div><div class=v>${j.tempo_restante_s}s / ${j.tempo_alvo_s}s</div></div>"
+    "     <div class=card><div class=k>R1 Esteira</div><div class=v>${j.rele?'ON':'off'} / ${j.esteira?'LIG':'par'}</div></div>"
+    "     <div class=card><div class=k>Encoder</div><div class=v>${j.encoder}</div></div>"
+    "     <div class=card><div class=k>Sirene</div><div class=v>${j.sirene_hab?'HAB':'off'}</div></div>"
+    "     <div class=card><div class=k>IP PLC</div><div class=v>${j.ip_plc}</div></div>"
+    "     <div class=card><div class=k>IP impr.</div><div class=v>${j.ip_impressora}</div></div>"
     "   </div>`;"
     "  if(primeiro){"
     "   i_tempo.value=j.tempo_alvo_s; i_mixa.value=j.tempo_mixa_s; i_mixb.value=j.tempo_mixb_s;"
@@ -238,7 +293,7 @@ static void rotaManutHTML(Client& c) {
     " }catch(e){document.getElementById('live').textContent='sem resposta: '+e;}"
     "}"
     "tick(); setInterval(tick, 1500);"
-    "</script></body></html>"
+    "</script></div></body></html>"
   ));
 }
 
@@ -436,6 +491,23 @@ static void rotaModbus(Client& c, const String& q) {
   respondeJson(c, "{\"ok\":false,\"msg\":\"fc precisa ser 1,2,3,4,5 ou 6\"}");
 }
 
+// GET /rele?n=X&v=on|off|pulso  - aciona rele X (0..3) manualmente
+static void rotaRele(Client& c, const String& q) {
+  int n = param(q, "n").toInt();
+  String v = param(q, "v");
+  int op = -1;
+  if (v == "off" || v == "0") op = 0;
+  else if (v == "on"  || v == "1") op = 1;
+  else if (v == "pulso" || v == "p") op = 2;
+  else { respondeJson(c, "{\"ok\":false,\"msg\":\"v=on|off|pulso\"}"); return; }
+  int r = manutReleAciona(n, op);
+  char buf[160];
+  if (r == 0) snprintf(buf, sizeof buf, "{\"ok\":true,\"n\":%d,\"op\":\"%s\"}", n, v.c_str());
+  else if (r == 1) snprintf(buf, sizeof buf, "{\"ok\":false,\"msg\":\"canal invalido (use 0..3)\"}");
+  else snprintf(buf, sizeof buf, "{\"ok\":false,\"msg\":\"R%d bloqueado durante ciclo\"}", n + 1);
+  respondeJson(c, buf);
+}
+
 static bool manutencaoRota(Client& c, const String& metodo, const String& caminho,
                            const String& q, uint32_t contentLen) {
   if (caminho == "/manut")      { rotaManutHTML(c); return true; }
@@ -443,6 +515,7 @@ static bool manutencaoRota(Client& c, const String& metodo, const String& caminh
   if (caminho == "/log.txt")    { rotaLogTxt(c); return true; }
   if (caminho == "/set")        { rotaSet(c, q); return true; }
   if (caminho == "/mb")         { rotaModbus(c, q); return true; }
+  if (caminho == "/rele")       { rotaRele(c, q); return true; }
   if (caminho == "/update" && metodo == "GET")  { rotaUpdateGET(c); return true; }
   if (caminho == "/update" && metodo == "POST") { rotaUpdatePOST(c, contentLen); return true; }
   if (caminho == "/ap/off") {

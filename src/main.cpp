@@ -618,6 +618,43 @@ void manutParar() { pararTudo(); }
 // nao travar o controle da esteira no meio de um ciclo.
 bool otaPermitido() { return fase == OCIOSO && !sireneAtiva; }
 
+// Acionamento manual de rele pelo painel /manut. R1 (esteira) tem
+// bloqueio durante ciclo. Op: 0=desliga, 1=liga, 2=pulso PULSO_MS.
+// Retorno: 0 ok, 1 canal invalido, 2 em ciclo (R1 bloqueado).
+static unsigned long tReleManualPulso[4] = {0};
+int manutReleAciona(int canal, int op) {
+  if (canal < 0 || canal > 3) return 1;
+  if (canal == RELE_CANAL && fase != OCIOSO) return 2;
+  if (op == 0) {
+    M5StamPLC.writePlcRelay(canal, false);
+    tReleManualPulso[canal] = 0;
+    if (canal == RELE_CANAL) releLigado = false;
+  } else if (op == 1) {
+    M5StamPLC.writePlcRelay(canal, true);
+    tReleManualPulso[canal] = 0;
+    if (canal == RELE_CANAL) releLigado = true;
+  } else if (op == 2) {
+    M5StamPLC.writePlcRelay(canal, true);
+    if (canal == RELE_CANAL) releLigado = true;
+    tReleManualPulso[canal] = millis();
+  }
+  logf("Rele R%d manual: %s", canal + 1,
+       op == 0 ? "off" : op == 1 ? "on" : "pulso");
+  relEvento("RELE_MANUAL", "",
+            op == 0 ? "off" : op == 1 ? "on" : "pulso");
+  return 0;
+}
+// Serviço: fecha pulsos manuais que estouraram PULSO_MS
+void manutProcessaPulsosReles() {
+  for (int i = 0; i < 4; i++) {
+    if (tReleManualPulso[i] && millis() - tReleManualPulso[i] >= PULSO_MS) {
+      M5StamPLC.writePlcRelay(i, false);
+      if (i == RELE_CANAL) releLigado = false;
+      tReleManualPulso[i] = 0;
+    }
+  }
+}
+
 // ---- Modbus explorer (reusa funcoes internas) -------------------------
 bool mbManutLeRegs(uint8_t fc, uint16_t addr, uint16_t qty, uint16_t* out) {
   if (qty < 1 || qty > 125) return false;
@@ -902,6 +939,7 @@ void loop() {
   atendeWeb();         // atende Ethernet (impressora) + WiFi AP (manutencao)
   manutencaoLoop();    // timeout do AP
   groveLoop();         // Serial1 do Grove (Cardputer)
+  manutProcessaPulsosReles();  // fecha pulsos manuais
   processaModoManual();
   processaSirene();
   processaLogContador();
