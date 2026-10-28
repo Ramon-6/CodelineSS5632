@@ -137,6 +137,31 @@ static bool escreverBobina(uint16_t addr, bool on) {
   return mbTransacao(pdu, 5, r, rl);
 }
 
+// Escreve texto no registro do scanner (4x0201 = addr 200). Usado pra forcar
+// uma mensagem na tela da impressora durante o estado de limpeza.
+// qty words = (strlen+1)/2 arredondado pra cima, max 16 (32 chars).
+static bool escreverTextoScanner(const char* texto) {
+  const int MAX_CHARS = 32;
+  const int MAX_WORDS = MAX_CHARS / 2;
+  size_t len = strlen(texto);
+  if (len > MAX_CHARS) len = MAX_CHARS;
+  // qty em words - cobre todos os chars + 1 pra terminator se couber
+  int qty = (len + 2) / 2;  // +1 pra null, dividido por 2 e arredondado
+  if (qty > MAX_WORDS) qty = MAX_WORDS;
+  if (qty < 1) qty = 1;
+  uint8_t pdu[6 + 2 * MAX_WORDS];
+  pdu[0] = 0x10;             // fc write multiple registers
+  pdu[1] = 0; pdu[2] = 200;  // addr 200 = 4x0201
+  pdu[3] = 0; pdu[4] = qty;
+  pdu[5] = qty * 2;          // byte count
+  for (int i = 0; i < qty * 2; i++) {
+    pdu[6 + i] = (i < (int)len) ? texto[i] : 0;  // null-pad depois do texto
+  }
+  uint8_t r[16];
+  size_t rl;
+  return mbTransacao(pdu, 6 + qty * 2, r, rl);
+}
+
 // ---- Protocolo privado (porta 4008) ----------------
 // Envia comando pra impressora via porta 4008 e espera resposta curta
 static bool enviar4008(const uint8_t* cmd, size_t n) {
@@ -393,6 +418,11 @@ static bool sireneHabilitada = SIRENE_LIMPEZA_HABILITADO;
 static int sireneHoras[3] = {8, 13, 18};
 static int sireneMinutos[3] = {0, 0, 0};
 static bool sireneAtiva = false;
+// Texto gravado na tela da impressora enquanto sirene esta ativa.
+// Durante esse periodo o PLC bloqueia disparar() e re-escreve essa string
+// se o operador bipar algum codigo por engano.
+#define SIRENE_TEXTO_IMPRESSORA  "LIMPE O CABECOTE DE IMPRESSAO"
+static unsigned long tReescreverSirene = 0;
 static bool sireneDisparadoHoje[3] = {false, false, false};
 static int sireneUltDia = -1;
 static bool tampaAnterior = false;
@@ -786,9 +816,26 @@ static void processaSirene() {
         tTampaAbriu = 0;
         avisof("SIRENE - hora de limpar cabecote (%02d:%02d)", sireneHoras[i], sireneMinutos[i]);
         relEvento("SIRENE_LIGADA", "", "hora limpeza");
+        // Grava a mensagem na tela da impressora na hora
+        escreverTextoScanner(SIRENE_TEXTO_IMPRESSORA);
+        tReescreverSirene = millis();
         break;
       }
     }
+  }
+  // Enquanto sirene ativa: se o operador bipar algum codigo, o scanner vai
+  // mostrar o texto bipado. Re-escrevemos nossa mensagem por cima a cada
+  // ciclo que o texto saia diferente (checagem via ultimoSnap.texto).
+  if (sireneAtiva && millis() - tReescreverSirene > 1500) {
+    if (ultimoSnap.texto[0] &&
+        strncmp(ultimoSnap.texto, SIRENE_TEXTO_IMPRESSORA, 16) != 0) {
+      avisof("Codigo lido ignorado: limpar cabecote primeiro");
+      escreverTextoScanner(SIRENE_TEXTO_IMPRESSORA);
+    } else if (!ultimoSnap.texto[0]) {
+      // Scanner apagou (reload externo?) - garante que a mensagem fica
+      escreverTextoScanner(SIRENE_TEXTO_IMPRESSORA);
+    }
+    tReescreverSirene = millis();
   }
   // Detecta tampa aberta/fechada com debounce de SIRENE_TAMPA_MIN_ABERTA_MS
   bool tampa = ultimoSnap.coverOpen;
@@ -808,6 +855,8 @@ static void processaSirene() {
       tTampaAbriu = 0;
       avisof("Cabecote limpo - sirene desligada");
       relEvento("SIRENE_DESLIGADA", "", "tampa fechada");
+      // Apaga a mensagem de limpeza da tela da impressora
+      recarregarTemplate();
     } else if (sireneAtiva) {
       avisof("Tampa encostada rapido - sirene continua");
       relEvento("SIRENE_IGNORADA", "", "tampa < 5s");
@@ -1206,8 +1255,9 @@ void loop() {
       else {
         if (strcmp(tmp.texto, base.texto)) logf("texto: [%s] -> [%s]", base.texto, tmp.texto);
         if (tmp.alarme != base.alarme) { logf("ALARME: %d -> %d", base.alarme, tmp.alarme); relEvento("ALARME", "", tmp.alarme ? "ativo" : "normal"); }
-        if (fase == OCIOSO && (millis() - tBoot >= BOOT_GRACE_MS)) {
-          bool porTexto = TRIGGER_TEXTO && tmp.texto[0] && strcmp(tmp.texto, base.texto) != 0;
+        if (fase == OCIOSO && !sireneAtiva && (millis() - tBoot >= BOOT_GRACE_MS)) {
+          bool porTexto = TRIGGER_TEXTO && tmp.texto[0] && strcmp(tmp.texto, base.texto) != 0
+            && strncmp(tmp.texto, SIRENE_TEXTO_IMPRESSORA, 16) != 0;  // ignora nossa propria mensagem
           bool porCache = TRIGGER_CACHE && tmp.cache > base.cache;
           bool porContador = tmp.contador > base.contador;
           bool porSN = tmp.sn[0] && strcmp(tmp.sn, base.sn) != 0;  // novo: SN mudou

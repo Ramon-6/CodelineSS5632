@@ -79,7 +79,7 @@
 // ---- Sirene limpeza do cabecote (ponto 4) -----------------------------
 // Em cada horario, liga R2 ate operador abrir a tampa (1x0018=1) e fechar
 // (volta a 0). Deixe HABILITADO=0 ate ajustar os horarios no painel.
-#define SIRENE_LIMPEZA_HABILITADO 0
+#define SIRENE_LIMPEZA_HABILITADO 1       // habilitado por padrao com bloqueio ativo
 #define SIRENE_CANAL              1       // R2
 #define SIRENE_HORARIOS_PADRAO    "07:00,16:00,00:00"
 // Tempo minimo que a tampa precisa ficar aberta pra considerar "limpou de verdade".
@@ -90,8 +90,8 @@
 // Botao A segurado 3s em qualquer pagina do PLC sobe um Access Point WiFi
 // para o Cardputer/celular acessar o painel + atualizar firmware sem notebook.
 // NAO INTERFERE no Ethernet que fala com a impressora (hardware separado).
-#define MANUTENCAO_AP_SSID       "StamPLC-Sumi"
-#define MANUTENCAO_AP_SENHA      "sumi1234"        // minimo 8 chars
+#define MANUTENCAO_AP_SSID       "batoff"
+#define MANUTENCAO_AP_SENHA      "batoff1234"      // minimo 8 chars
 #define MANUTENCAO_AP_TIMEOUT_MS 1800000UL         // 30 min sem cliente -> desliga
 
 // ---- Grove UART: Cardputer conectado por cabo (plano B offline) -------
