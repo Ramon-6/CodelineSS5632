@@ -101,18 +101,25 @@ static void titulo(const char* t) {
   g().setTextColor(C_FG, C_BG);
 }
 
+// Area util de desenho (acima do rodape). Qualquer tela deve manter o
+// conteudo ate y = AREA_FIM pra nao ser tampado pelo rodape.
+#define RODAPE_H 11
+#define AREA_FIM (H - RODAPE_H)
+
 static void rodape(const char* esquerda, const char* direita) {
+  // linha separadora acima do rodape, pro texto nao ficar grudado no conteudo
+  g().drawFastHLine(0, AREA_FIM - 1, W, C_MUT);
   g().setTextColor(C_MUT, C_BG);
   g().setFont(&fonts::Font0);
-  g().setCursor(4, H - 10);
+  g().setCursor(4, AREA_FIM + 2);
   g().print(esquerda);
   if (direita) {
     int lw = g().textWidth(direita);
-    g().setCursor(W - lw - 4, H - 10);
+    g().setCursor(W - lw - 4, AREA_FIM + 2);
     g().print(direita);
   }
   g().setTextColor(C_FG, C_BG);
-  flush();  // double-buffer: envia o quadro inteiro de uma vez (sem piscar)
+  flush();
 }
 
 // ---- Icones vetoriais ------------------------------------------------
@@ -387,7 +394,7 @@ static void desenhaWifi() {
     g().print(ITENS_WIFI[i]);
   }
   g().setTextColor(C_FG, C_BG);
-  rodape("; / up/dn  Enter OK", "` voltar");
+  rodape("; sobe  / desce  Enter OK", "` voltar");
 }
 
 static void acaoWifiConectar() {
@@ -572,8 +579,8 @@ static void desenhaAjustes() {
     return;
   }
   g().setFont(&fonts::Font2);
-  // 5 itens visiveis por vez (115/13 ~= 8)
-  int VIS = 7;
+  // itens visiveis sem tampar com rodape: (AREA_FIM - 22) / 14
+  int VIS = (AREA_FIM - 22) / 14;
   if (listSel < listOff) listOff = listSel;
   if (listSel >= listOff + VIS) listOff = listSel - VIS + 1;
   for (int i = 0; i < VIS && listOff + i < AJUSTES_N; i++) {
@@ -597,7 +604,7 @@ static void desenhaAjustes() {
     g().print(val);
   }
   g().setTextColor(C_FG, C_BG);
-  rodape("; /  Enter editar", "` voltar");
+  rodape("; sobe  / desce  Enter edita", "` voltar");
 }
 
 // ---- Tela: editar valor de ajuste ----------------------------------
@@ -707,7 +714,7 @@ static void desenhaModbus() {
   g().setCursor(6, 94);
   g().print("       17 tampa  2 clear");
   g().setTextColor(C_FG, C_BG);
-  rodape("; / troca  . , muda", "Enter exec  ` volta");
+  rodape("; / troca campo  . , muda", "Enter exec");
 }
 
 static void execModbus() {
@@ -871,8 +878,8 @@ void loop() {
     } break;
 
     case T_WIFI: {
-      if (t.up)   { listSel = (listSel + ITENS_WIFI_N - 1) % ITENS_WIFI_N; desenhaWifi(); }
-      if (t.down) { listSel = (listSel + 1) % ITENS_WIFI_N; desenhaWifi(); }
+      if (t.up || t.left)   { listSel = (listSel + ITENS_WIFI_N - 1) % ITENS_WIFI_N; desenhaWifi(); }
+      if (t.down || t.right) { listSel = (listSel + 1) % ITENS_WIFI_N; desenhaWifi(); }
       if (t.enter) {
         if (listSel == 0) acaoWifiConectar();
         else if (listSel == 1) { trocarCampo = 0; trocarSSID = ""; trocarSenha = ""; tela = T_WIFI_TROCAR; desenhaTrocar(); }
@@ -910,8 +917,8 @@ void loop() {
     } break;
 
     case T_AJUSTES: {
-      if (t.up)   { listSel = (listSel + AJUSTES_N - 1) % AJUSTES_N; desenhaAjustes(); }
-      if (t.down) { listSel = (listSel + 1) % AJUSTES_N; desenhaAjustes(); }
+      if (t.up || t.left)    { listSel = (listSel + AJUSTES_N - 1) % AJUSTES_N; desenhaAjustes(); }
+      if (t.down || t.right) { listSel = (listSel + 1) % AJUSTES_N; desenhaAjustes(); }
       if (t.enter) {
         const ItemAjuste& a = AJUSTES[listSel];
         if (a.tipo == 2) {
@@ -975,8 +982,8 @@ void loop() {
     case T_LOG: {
       if (t.esc) { tela = T_MENU; desenhaMenu(); }
       if (t.enter) { atualizaLog(); logScroll = 0; desenhaLog(); }
-      if (t.up) { logScroll = max(0, logScroll - 1); desenhaLog(); }
-      if (t.down) { logScroll++; desenhaLog(); }
+      if (t.up || t.left)    { logScroll = max(0, logScroll - 1); desenhaLog(); }
+      if (t.down || t.right) { logScroll++; desenhaLog(); }
     } break;
 
     case T_SOBRE: {
