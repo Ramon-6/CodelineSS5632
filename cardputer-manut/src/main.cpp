@@ -1,4 +1,4 @@
-// StamPLC Manut - firmware do M5Stack Cardputer que controla o StamPLC
+﻿// StamPLC Manut - firmware do M5Stack Cardputer que controla o StamPLC
 // da Sumiriko sem precisar de notebook.
 //
 // Como usar:
@@ -24,14 +24,18 @@
 #define AP_SENHA_PADRAO  "sumi1234"
 #define BASE_URL         "http://192.168.4.1"
 
-// Cores (fundo branco, letra preta)
-#define C_BG   0xFFFF
-#define C_FG   0x0000
-#define C_MUT  0x8410    // cinza
-#define C_OK   0x1F02    // verde
+// Cores: mesmo tema do launcher do Cardputer
+// bg #0f0f0f, s1 #181818, br #303030, fg #d4d4d4, dim #888, ac verde #3ddc84, yw #e0d204
+#define C_BG   0x0861    // #0f0f0f fundo escuro
+#define C_PANEL 0x18C3   // #181818 painel/card
+#define C_BR   0x3186    // #303030 borda
+#define C_FG   0xD69A    // #d4d4d4 texto principal
+#define C_MUT  0x8C51    // #888888 texto apagado
+#define C_ACC  0x3EF0    // #3ddc84 verde terminal (destaque)
+#define C_YW   0xE724    // #e0d204 amarelo
+#define C_OK   0x3EF0    // ok = verde
 #define C_ER   0xF800    // vermelho
 #define C_WK   0xFC00    // laranja
-#define C_ACC  0x001F    // azul
 
 // Resolucao do Cardputer
 #define W 240
@@ -90,8 +94,8 @@ static void limpa() {
 static void flush() { canvas.pushSprite(0, 0); }
 
 static void titulo(const char* t) {
-  g().fillRect(0, 0, W, 18, C_FG);
-  g().setTextColor(C_BG, C_FG);
+  g().fillRect(0, 0, W, 18, C_ACC);
+  g().setTextColor(C_BG, C_ACC);
   g().setFont(&fonts::Font2);
   g().setCursor(6, 2);
   g().print(t);
@@ -101,26 +105,12 @@ static void titulo(const char* t) {
   g().setTextColor(C_FG, C_BG);
 }
 
-// Area util de desenho (acima do rodape). Qualquer tela deve manter o
-// conteudo ate y = AREA_FIM pra nao ser tampado pelo rodape.
-#define RODAPE_H 11
-#define AREA_FIM (H - RODAPE_H)
+// Area util de desenho vai ate o rodape da tela - sem barra de atalhos.
+#define AREA_FIM H
 
-static void rodape(const char* esquerda, const char* direita) {
-  // linha separadora acima do rodape, pro texto nao ficar grudado no conteudo
-  g().drawFastHLine(0, AREA_FIM - 1, W, C_MUT);
-  g().setTextColor(C_MUT, C_BG);
-  g().setFont(&fonts::Font0);
-  g().setCursor(4, AREA_FIM + 2);
-  g().print(esquerda);
-  if (direita) {
-    int lw = g().textWidth(direita);
-    g().setCursor(W - lw - 4, AREA_FIM + 2);
-    g().print(direita);
-  }
-  g().setTextColor(C_FG, C_BG);
-  flush();
-}
+// rodape() agora so faz o flush do quadro. Os parametros sao ignorados
+// pra nao precisar remover as centenas de chamadas espalhadas.
+static void rodape(const char*, const char*) { flush(); }
 
 // ---- Icones vetoriais ------------------------------------------------
 // Desenhados dentro de um retangulo (x,y, 40x30) ou (x,y, w,h)
@@ -587,7 +577,7 @@ static void desenhaAjustes() {
     int idx = listOff + i;
     int y = 22 + i * 14;
     bool sel = idx == listSel;
-    if (sel) { g().fillRect(0, y - 1, W, 13, C_FG); g().setTextColor(C_BG, C_FG); }
+    if (sel) { g().fillRect(0, y - 1, W, 13, C_ACC); g().setTextColor(C_BG, C_ACC); }
     else     { g().setTextColor(C_FG, C_BG); }
     g().setCursor(6, y);
     g().print(AJUSTES[idx].rotulo);
@@ -692,19 +682,19 @@ static void desenhaModbus() {
 
   g().setCursor(6, 26);
   g().print("Funcao : ");
-  if (mbCampo == 0) { g().fillRect(60, 25, W-66, 13, C_FG); g().setTextColor(C_BG, C_FG); }
+  if (mbCampo == 0) { g().fillRect(60, 25, W-66, 13, C_ACC); g().setTextColor(C_BG, C_ACC); }
   g().setCursor(64, 26); g().print(fcNome);
   g().setTextColor(C_FG, C_BG);
 
   g().setCursor(6, 42);
   g().print("Endrc  : ");
-  if (mbCampo == 1) { g().fillRect(60, 41, W-66, 13, C_FG); g().setTextColor(C_BG, C_FG); }
+  if (mbCampo == 1) { g().fillRect(60, 41, W-66, 13, C_ACC); g().setTextColor(C_BG, C_ACC); }
   g().setCursor(64, 42); g().print(mbAddr);
   g().setTextColor(C_FG, C_BG);
 
   g().setCursor(6, 58);
   g().print(mbFC == 5 || mbFC == 6 ? "Valor  : " : "N regs : ");
-  if (mbCampo == 2) { g().fillRect(60, 57, W-66, 13, C_FG); g().setTextColor(C_BG, C_FG); }
+  if (mbCampo == 2) { g().fillRect(60, 57, W-66, 13, C_ACC); g().setTextColor(C_BG, C_ACC); }
   g().setCursor(64, 58); g().print(mbN);
   g().setTextColor(C_FG, C_BG);
 
