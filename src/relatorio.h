@@ -175,7 +175,7 @@ static Resumo resumoDoDia(const String& dia, bool hoje) {
   return r;
 }
 
-static void enviaCsv(EthernetClient& c, const String& dia) {
+static void enviaCsv(Client& c, const String& dia) {
   File f = SD.open("/rel/" + dia + ".csv");
   if (!f) {
     c.print("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\nsem registros");

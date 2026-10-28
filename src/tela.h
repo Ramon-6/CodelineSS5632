@@ -442,6 +442,50 @@ static void telaFimCiclo(M5Canvas& g, const char* motivo) {
 
 // Tela gigante colorida para fases de operacao: fundo cor + titulo grande + subtitulo.
 // Se mostraCodigo = true, escreve o codigo embaixo. corTxt = cor do titulo (contraste).
+// Overlay fullscreen com SSID+senha+IP quando o AP WiFi acaba de ser ligado.
+// Mostrada por 6s depois de segurar o botao A.
+extern bool manutencaoAPAtivo();
+extern unsigned long tMostraAP;
+static void telaAPInfo(M5Canvas& g) {
+  int w = g.width();
+  g.fillScreen(RGB565(16, 136, 68));  // verde terminal
+  g.setTextColor(0xFFFF);
+  g.setFont(&fonts::Font4);
+  const char* t = "WIFI DE MANUTENCAO";
+  g.setCursor((w - g.textWidth(t)) / 2, 6);
+  g.print(t);
+  g.setFont(&fonts::Font0);
+  g.setCursor(10, 36); g.print("REDE");
+  g.setFont(&fonts::Font4);
+  g.setCursor(10, 48); g.print("StamPLC-Sumi");
+  g.setFont(&fonts::Font0);
+  g.setCursor(10, 76); g.print("SENHA");
+  g.setFont(&fonts::Font4);
+  g.setCursor(10, 88); g.print("sumi1234");
+  // IP no canto direito
+  g.setFont(&fonts::Font0);
+  g.setCursor(w - 90, 36); g.print("ABRA NO CELULAR");
+  g.setFont(&fonts::Font2);
+  g.setCursor(w - 90, 48); g.print("192.168.4.1");
+  g.setCursor(w - 90, 64); g.print("/manut");
+  // rodape
+  g.setFont(&fonts::Font0);
+  g.fillRect(0, 122, w, 13, 0xFFFF);
+  g.setTextColor(RGB565(16, 136, 68), 0xFFFF);
+  g.setCursor(6, 125); g.print("Segure A 3s para desligar");
+}
+
+// Barra fina no topo das paginas normais quando AP esta ativo
+static void barraAPAtiva(M5Canvas& g) {
+  if (!manutencaoAPAtivo()) return;
+  int w = g.width();
+  g.fillRect(0, 0, w, 10, RGB565(16, 136, 68));
+  g.setFont(&fonts::Font0);
+  g.setTextColor(0xFFFF, RGB565(16, 136, 68));
+  g.setCursor(4, 2);
+  g.print("AP ON  192.168.4.1  (A 3s desliga)");
+}
+
 static void telaFase(M5Canvas& g, uint16_t fundo, uint16_t corTxt, const char* titulo,
                      const char* subt, bool mostraCodigo) {
   int w = g.width(), h = g.height();
@@ -476,6 +520,12 @@ static void desenhaTela() {
       cv = nullptr;
       return;
     }
+  }
+  // Overlay AP: prioridade maxima quando acabou de ser ligado
+  if (tMostraAP && millis() - tMostraAP < 6000) {
+    telaAPInfo(*cv);
+    cv->pushSprite(0, 0);
+    return;
   }
   // Em operacao: ignora navegacao e mostra a tela de ciclo colorida (fullscreen)
   if (fase == RODANDO) { telaOperando(*cv); cv->pushSprite(0, 0); return; }
@@ -591,5 +641,6 @@ static void desenhaTela() {
     default: telaAjustes(*cv); break;
   }
   barraBase(*cv);
+  barraAPAtiva(*cv);   // barra verde no topo quando AP esta ligado
   cv->pushSprite(0, 0);
 }

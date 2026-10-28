@@ -84,7 +84,7 @@ static void manutencaoDesligaAP() {
   apAtivo = false;
 }
 
-static bool manutencaoAPAtivo() { return apAtivo; }
+inline bool manutencaoAPAtivo() { return apAtivo; }
 
 static void manutencaoLoop() {
   if (!apAtivo) return;

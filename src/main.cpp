@@ -408,6 +408,7 @@ static unsigned long tLogContador = 0;
 // Momento em que o ultimo ciclo terminou - usado pra mostrar FIM DE CICLO
 // na tela por 3s antes de voltar ao PRONTO.
 unsigned long tMostraFim = 0;
+unsigned long tMostraAP = 0;  // overlay fullscreen do AP WiFi por 6s apos ligar
 
 // Estado da limpeza (global - antes era static dentro do loop e ficava com estado
 // errado se operador cancelasse via pararTudo durante LIMP_ESPERAR)
@@ -847,6 +848,7 @@ void loop() {
     apBtnConsumido = true;
     manutencaoToggleAP();
     bool on = manutencaoAPAtivo();
+    tMostraAP = on ? millis() : 0;  // dispara overlay fullscreen por 6s
     avisof("AP %s", on ? "LIGADO" : "desligado");
     if (on) {
       avisof("SSID: " MANUTENCAO_AP_SSID);
@@ -884,18 +886,18 @@ void loop() {
     }
   }
   // Pagina AJUSTES: B segurado 2s alterna modo MANUAL/AUTO
-  if (pagina == 4 && M5StamPLC.BtnB().pressedFor(2000)) {
-    static unsigned long tModo = 0;
-    if (millis() - tModo > 2500) {
-      tModo = millis();
-      modoManual = !modoManual;
-      prefs.putBool("manual", modoManual);
-      tSalvo = millis();
-      avisof("Modo: %s", modoManual ? "MANUAL" : "AUTO");
-      relEvento("MODO", "", modoManual ? "manual" : "auto");
-    }
+  // Flag impede que o wasPressed() do mesmo gesto acione mudaTempo(+1min)
+  static bool modoBtnConsumido = false;
+  if (pagina == 4 && M5StamPLC.BtnB().pressedFor(2000) && !modoBtnConsumido) {
+    modoBtnConsumido = true;
+    modoManual = !modoManual;
+    prefs.putBool("manual", modoManual);
+    tSalvo = millis();
+    avisof("Modo: %s", modoManual ? "MANUAL" : "AUTO");
+    relEvento("MODO", "", modoManual ? "manual" : "auto");
   }
-  if (M5StamPLC.BtnB().wasPressed()) {
+  if (!M5StamPLC.BtnB().isPressed()) modoBtnConsumido = false;
+  if (M5StamPLC.BtnB().wasPressed() && !modoBtnConsumido) {
     botao = true;
     if (pagina == 4) {
       mudaTempo(60000);  // +1 minuto
