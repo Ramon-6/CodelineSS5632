@@ -86,6 +86,22 @@
 // Protege contra operador que so encosta no fim de curso.
 #define SIRENE_TAMPA_MIN_ABERTA_MS 5000   // 5 s
 
+// ---- Manutencao em campo: AP WiFi + OTA (ponto 7) ---------------------
+// Botao A segurado 3s em qualquer pagina do PLC sobe um Access Point WiFi
+// para o Cardputer/celular acessar o painel + atualizar firmware sem notebook.
+// NAO INTERFERE no Ethernet que fala com a impressora (hardware separado).
+#define MANUTENCAO_AP_SSID       "StamPLC-Sumi"
+#define MANUTENCAO_AP_SENHA      "sumi1234"        // minimo 8 chars
+#define MANUTENCAO_AP_TIMEOUT_MS 1800000UL         // 30 min sem cliente -> desliga
+
+// ---- Grove UART: Cardputer conectado por cabo (plano B offline) -------
+// Protocolo texto, 1 linha por comando. Pinos padrao do conector Grove do
+// StamPLC (confirmar se o modulo tiver outra pinagem).
+#define GROVE_SERIAL_HABILITADO  1
+#define GROVE_SERIAL_PIN_RX      13
+#define GROVE_SERIAL_PIN_TX      15
+#define GROVE_SERIAL_BAUD        115200
+
 // ---- Encoder/contador 4x0061 (ponto 6) --------------------------------
 // Fase 1 (atual): so loga no CSV o valor do contador a cada N segundos.
 // Depois de analisar o grafico, ativar FIM_HABILITADO=1 pra que o fim do

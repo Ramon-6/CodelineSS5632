@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Paginas HTML do StamPLC (painel, relatorios, eventos, ajustes).
 // Incluir no main.cpp depois de tela.h.
 
@@ -89,17 +89,17 @@ static const char CSS2[] =
     "@media(max-width:620px){.tb{padding:8px 12px;gap:8px}.logo s{display:none}"
     "nav a{padding:7px 10px;font-size:13px}.st b{font-size:24px}main{padding:12px}}";
 
-static void http200(EthernetClient& c) {
+static void http200(Client& c) {
   c.print("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n");
 }
 
-static void redireciona(EthernetClient& c, const char* destino) {
+static void redireciona(Client& c, const char* destino) {
   c.print("HTTP/1.1 303 See Other\r\nLocation: ");
   c.print(destino);
   c.print("\r\nConnection: close\r\n\r\n");
 }
 
-static void abre(EthernetClient& c, const char* ativo, const char* titulo) {
+static void abre(Client& c, const char* ativo, const char* titulo) {
   http200(c);
   c.print("<!doctype html><html lang='pt-br'><head><meta charset='utf-8'>"
           "<meta name='viewport' content='width=device-width,initial-scale=1'><title>");
@@ -116,7 +116,7 @@ static void abre(EthernetClient& c, const char* ativo, const char* titulo) {
   c.print("</nav></div></div><main>");
 }
 
-static void fecha(EthernetClient& c, bool atualiza) {
+static void fecha(Client& c, bool atualiza) {
   // ah(data, voltarAoPainel): manda a data/hora para o equipamento
   c.print("<script>function ah(d,v){location='/hora?'+(v?'volta=/&':'')+'a='+d.getFullYear()+'&m='+(d.getMonth()+1)"
           "+'&d='+d.getDate()+'&h='+d.getHours()+'&i='+d.getMinutes()+'&s='+d.getSeconds()}</script>");
@@ -129,11 +129,11 @@ static void fecha(EthernetClient& c, bool atualiza) {
 
 static const char* clsNivel(int n) { return n == 0 ? "ok" : n == 1 ? "wk" : "er"; }
 
-static void linhaConexao(EthernetClient& c, bool ok, const char* nome, const String& valor) {
+static void linhaConexao(Client& c, bool ok, const char* nome, const String& valor) {
   c.printf("<tr><td><span class='dot %s'></span>%s</td><td>%s</td></tr>", ok ? "ok" : "er", nome, valor.c_str());
 }
 
-static void cartoesResumo(EthernetClient& c, const Resumo& r) {
+static void cartoesResumo(Client& c, const Resumo& r) {
   long tot = r.ligada + r.parada;
   c.printf("<div class='grid'><div class='card'><small>Codigos lidos</small><b>%d</b></div>"
            "<div class='card'><small>Esteira ligada</small><b style='color:var(--ok)'>%s</b></div>"
@@ -145,7 +145,7 @@ static void cartoesResumo(EthernetClient& c, const Resumo& r) {
 }
 
 // ---- Painel ---------------------------------------------------------------------
-static void paginaPainel(EthernetClient& c) {
+static void paginaPainel(Client& c) {
   abre(c, "painel", "Painel");
   if (!horaOk)
     c.print("<div class='alert'>A hora do equipamento ainda nao foi acertada; os relatorios ficam sem data. "
@@ -216,7 +216,7 @@ static String nomeEvento(const String& e, const char*& cls) {
   return e;
 }
 
-static void paginaDia(EthernetClient& c, const String& dia, const char* ativo) {
+static void paginaDia(Client& c, const String& dia, const char* ativo) {
   char hojeS[16], h[10];
   carimbo(hojeS, h);
   bool hoje = dia == hojeS;
@@ -248,7 +248,7 @@ static void paginaDia(EthernetClient& c, const String& dia, const char* ativo) {
   fecha(c, hoje);
 }
 
-static void paginaIndice(EthernetClient& c) {
+static void paginaIndice(Client& c) {
   abre(c, "dias", "Dias anteriores");
   c.print("<h1>Relatorio de cada dia</h1>");
   if (!sdOk) {
@@ -279,7 +279,7 @@ static void paginaIndice(EthernetClient& c) {
 }
 
 // ---- Eventos (registro tecnico) ----------------------------------------------------
-static void paginaEventos(EthernetClient& c) {
+static void paginaEventos(Client& c) {
   abre(c, "eventos", "Eventos");
   c.print("<h1>Registro tecnico</h1><p class='nota'>O que o equipamento fez desde que ligou, mais recente primeiro. "
           "Serve para suporte; o relatorio do dia fica na aba Hoje.</p><table><tr><th>Hora</th><th>Evento</th></tr>");
@@ -295,7 +295,7 @@ static void paginaEventos(EthernetClient& c) {
 }
 
 // ---- Ajustes ---------------------------------------------------------------------------
-static void paginaConfig(EthernetClient& c, const char* erro, const char* sucesso = nullptr) {
+static void paginaConfig(Client& c, const char* erro, const char* sucesso = nullptr) {
   abre(c, "config", "Ajustes");
   c.print("<h1>Ajustes</h1>");
   if (sucesso) c.printf("<div class='alert ok'>%s</div>", sucesso);
@@ -351,26 +351,49 @@ static void paginaConfig(EthernetClient& c, const char* erro, const char* sucess
 }
 
 // ---- Atendimento ---------------------------------------------------------------------------
-static void atendeWeb() {
-  EthernetClient c = web.available();
-  if (!c) return;
-  unsigned long t0 = millis();
+// Hooks de manutencao (AP WiFi): respondem rotas /update, /live.json, /log.txt.
+// Implementados em manutencao.h; declaracoes fracas aqui pra permitir chamada antes do include.
+static bool manutencaoRota(Client& c, const String& metodo, const String& caminho,
+                           const String& q, uint32_t contentLen);
+static void manutencaoAtendeAP();
+
+// Le uma linha HTTP (ate \n), com timeout curto. Preserva body quando chega a linha vazia.
+static String leLinhaHTTP(Client& c, unsigned long t0, uint32_t maxMs = 400) {
   String linha;
-  while (c.connected() && millis() - t0 < 300) {
+  while (c.connected() && millis() - t0 < maxMs) {
     if (!c.available()) continue;
     char ch = c.read();
     if (ch == '\n') break;
-    if (ch != '\r' && linha.length() < 200) linha += ch;
+    if (ch != '\r' && linha.length() < 300) linha += ch;
   }
-  while (c.available()) c.read();  // descarta o resto do cabecalho
+  return linha;
+}
 
-  String caminho = "/", q = "";
-  if (linha.startsWith("GET ")) {
-    int fim = linha.indexOf(" HTTP");
-    String alvo = fim > 4 ? linha.substring(4, fim) : "/";
+static void respondeHTTP(Client& c) {
+  unsigned long t0 = millis();
+  String linha = leLinhaHTTP(c, t0, 400);
+
+  // Parseia request line: METODO CAMINHO HTTP/1.x
+  String metodo = "GET", caminho = "/", q = "";
+  int sp1 = linha.indexOf(' ');
+  int sp2 = sp1 >= 0 ? linha.indexOf(' ', sp1 + 1) : -1;
+  if (sp1 > 0 && sp2 > sp1) {
+    metodo = linha.substring(0, sp1);
+    String alvo = linha.substring(sp1 + 1, sp2);
     int qi = alvo.indexOf('?');
     if (qi >= 0) { caminho = alvo.substring(0, qi); q = alvo.substring(qi + 1); }
     else caminho = alvo;
+  }
+
+  // Le headers ate linha vazia; extrai Content-Length. NAO consome body - deixa pro handler.
+  uint32_t contentLen = 0;
+  while (c.connected() && millis() - t0 < 2000) {
+    String h = leLinhaHTTP(c, t0, 1000);
+    if (h.length() == 0) break;
+    String low = h; low.toLowerCase();
+    if (low.startsWith("content-length:")) {
+      contentLen = (uint32_t) strtoul(h.c_str() + 15, nullptr, 10);
+    }
   }
   String dia = param(q, "dia");
   for (unsigned i = 0; i < dia.length(); i++)  // so letras minusculas, digitos e hifen
@@ -456,8 +479,18 @@ static void atendeWeb() {
       ESP.restart();
     }
     paginaConfig(c, "Valores invalidos: confira os enderecos IP e use um tempo entre 1 e 600 segundos.");
+  } else if (manutencaoRota(c, metodo, caminho, q, contentLen)) {
+    // rota de manutencao atendeu (/update, /live.json, /log.txt, /manut)
   } else {
     c.print("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
   }
   c.stop();
 }
+
+// Despacho: atende tanto Ethernet (impressora) quanto AP WiFi (Cardputer/celular).
+static void atendeWeb() {
+  EthernetClient ec = web.available();
+  if (ec) respondeHTTP(ec);
+  manutencaoAtendeAP();
+}
+

@@ -32,6 +32,8 @@ próxima vez.
    diz, o que é falso e como contornar
 6. [Ligação física](06-ligacao-fisica.md) — diagrama elétrico do painel
    (fonte, relés, entradas, sirene, botão modo manual)
+7. [Manutenção em campo](07-manutencao-em-campo.md) — AP WiFi + OTA +
+   Grove UART para usar o Cardputer no lugar do notebook
 
 ## Convenção de endereços
 

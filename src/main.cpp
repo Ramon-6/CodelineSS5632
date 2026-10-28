@@ -449,6 +449,97 @@ static void sireneParseia(const char* s) {
 
 #include "tela.h"
 #include "paginas.h"
+#include "manutencao.h"
+#include "grove_cardputer.h"
+
+// ---- Implementacao dos hooks que manutencao.h e grove_cardputer.h declaram ----
+// Snapshot JSON do estado atual (serve ao /live.json E ao comando LIVE do Grove)
+const char* nomeFaseAtual() {
+  switch (fase) {
+    case OCIOSO: return "OCIOSO";
+    case PRE_PARA_PULSA: case PRE_PARA_ESPERA: return "PREPARANDO";
+    case PULSA_LIGA: case AGUARDA_LIGA: return "LIGANDO";
+    case RODANDO: return "OPERANDO";
+    case PAUSADA: return "PAUSADA";
+    case PULSA_PARA: case AGUARDA_PARA: case PARA_INSISTE: return "PARANDO";
+    case PARA_SEM_CODIGO: return "FIM";
+    case LIMPANDO: return "LIMPANDO";
+    case ERRO: return "ERRO";
+  }
+  return "?";
+}
+
+static uint32_t tempoAlvoCiclo() {
+  // detecta MIX A/B no codigo lido pelo scanner
+  if (MIX_RECIPE_HABILITADO && ultCodigo[0]) {
+    String s = ultCodigo; s.toUpperCase();
+    if (s.indexOf("MIX A") >= 0 || s.indexOf("MIXA") >= 0) return tempoMixAMs;
+    if (s.indexOf("MIX B") >= 0 || s.indexOf("MIXB") >= 0) return tempoMixBMs;
+  }
+  return esteiraSegMs;
+}
+
+int manutencaoColetaStatus(char* buf, size_t n) {
+  uint32_t tRest = 0;
+  if (fase != OCIOSO && fase != ERRO) {
+    uint32_t alvo = tempoAlvoCiclo();
+    uint32_t decorrido = (uint32_t)(millis() - tFase);
+    tRest = decorrido < alvo ? (alvo - decorrido) / 1000 : 0;
+  }
+  return snprintf(buf, n,
+    "{\"fase\":\"%s\",\"codigo\":\"%s\",\"hora_leitura\":\"%s\","
+    "\"rele\":%d,\"esteira\":%d,\"modo\":\"%s\","
+    "\"sirene_hab\":%d,\"encoder\":%lu,\"encoder_fim_hab\":%d,"
+    "\"tempo_alvo_s\":%lu,\"tempo_restante_s\":%lu,"
+    "\"tempo_mixa_s\":%lu,\"tempo_mixb_s\":%lu,"
+    "\"ip_plc\":\"%s\",\"ip_impressora\":\"%s\","
+    "\"ap_ativo\":%d,\"up_ms\":%lu}",
+    nomeFaseAtual(), ultCodigo, ultHora,
+    releLigado ? 1 : 0, esteiraLigada ? 1 : 0,
+    modoManual ? "manual" : "auto",
+    sireneHabilitada ? 1 : 0,
+    (unsigned long)ultimoSnap.contador,
+    encoderFimHabilitado ? 1 : 0,
+    (unsigned long)(tempoAlvoCiclo() / 1000),
+    (unsigned long)tRest,
+    (unsigned long)(tempoMixAMs / 1000),
+    (unsigned long)(tempoMixBMs / 1000),
+    Ethernet.localIP().toString().c_str(),
+    ipImpressora.toString().c_str(),
+    manutencaoAPAtivo() ? 1 : 0,
+    (unsigned long)millis()
+  );
+}
+
+// Despeja log circular em um Client (HTTP) ou em qualquer Stream (Serial Grove).
+template<typename T> static void despejaLog(T& out) {
+  for (int i = 0; i < LOG_N; i++) {
+    int idx = (logPos + i) % LOG_N;
+    if (logBuf[idx][0]) { out.println(logBuf[idx]); }
+  }
+}
+void manutencaoDespejaLog(Client& c) { despejaLog(c); }
+void manutencaoDespejaLogSerial(Stream& s) { despejaLog(s); }
+
+// Hooks do Grove: implementacoes concretas (chamam as funcoes ja existentes do main)
+static void pararTudo();  // forward (ja declarado abaixo)
+void grovePararCiclo() { pararTudo(); }
+void groveDispararTeste() {
+  if (fase == OCIOSO) disparar("grove", "TESTE-GROVE");
+}
+bool groveMudaTempo(uint32_t ms) {
+  if (ms < 60000 || ms > 36000000UL) return false;
+  esteiraSegMs = ms;
+  prefs.putUInt("etempo", ms);
+  return true;
+}
+void groveSetModo(bool manual) {
+  modoManual = manual;
+  prefs.putBool("manual", manual);
+  relEvento("MODO", "", manual ? "manual" : "auto");
+}
+uint32_t groveEncoder() { return ultimoSnap.contador; }
+const char* groveFaseNome() { return nomeFaseAtual(); }
 
 // ---- Maquina de estados -------------------------------------------------
 // Chamado quando um codigo foi lido pela impressora (ou botao de teste)
@@ -585,6 +676,8 @@ void setup() {
     Ethernet.begin(mac, ipLocal, ipGw, ipGw, ipMask);
   }
   web.begin();
+  manutencaoBegin();
+  groveBegin();
   sdIniciar();
   relogioCarrega();
   relVirada(false);
@@ -691,15 +784,32 @@ static void processaLogContador() {
 
 void loop() {
   M5StamPLC.update();
-  atendeWeb();
+  atendeWeb();         // atende Ethernet (impressora) + WiFi AP (manutencao)
+  manutencaoLoop();    // timeout do AP
+  groveLoop();         // Serial1 do Grove (Cardputer)
   processaModoManual();
   processaSirene();
   processaLogContador();
 
+  // Atalho global: botao A segurado 3s em qualquer pagina = liga/desliga AP WiFi
+  // (consome o botao - impede que o wasPressed seguinte troque de pagina)
+  static bool apBtnConsumido = false;
+  if (M5StamPLC.BtnA().pressedFor(3000) && !apBtnConsumido) {
+    apBtnConsumido = true;
+    manutencaoToggleAP();
+    bool on = manutencaoAPAtivo();
+    avisof("AP %s", on ? "LIGADO" : "desligado");
+    if (on) {
+      avisof("SSID: " MANUTENCAO_AP_SSID);
+      avisof("http://192.168.4.1");
+    }
+  }
+  if (!M5StamPLC.BtnA().isPressed()) apBtnConsumido = false;
+
   // A = proxima tela | B = testar (ou +tempo) | C = parar (ou -tempo). Rodape da tela mostra o que vale.
   static unsigned long tBotao = 0;
   bool botao = false;
-  if (M5StamPLC.BtnA().wasPressed()) { pagina = (pagina + 1) % N_PAG; botao = true; }
+  if (M5StamPLC.BtnA().wasPressed() && !apBtnConsumido) { pagina = (pagina + 1) % N_PAG; botao = true; }
   // Atalhos de botao segurado por 1 s:
   //  Pagina 2 (ESTADOS):  B = alterna origem esteira (rele <-> IN1)
   //                       C = alterna rede (DHCP <-> IP fixo) e reinicia
