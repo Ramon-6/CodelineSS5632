@@ -77,12 +77,17 @@ static const ItemMenu MENU[] = {
 static const int MENU_N = 6;
 
 // ---- Helpers de desenho ---------------------------------------------
-static auto& g() { return M5Cardputer.Display; }
+// Double-buffering: tudo desenha num sprite 240x135 (~65 KB RAM) e so copia
+// pra tela quando o quadro ta pronto. Elimina o piscar.
+static M5Canvas canvas(&M5Cardputer.Display);
+static auto& g() { return canvas; }
 
 static void limpa() {
   g().fillScreen(C_BG);
   g().setTextColor(C_FG, C_BG);
 }
+
+static void flush() { canvas.pushSprite(0, 0); }
 
 static void titulo(const char* t) {
   g().fillRect(0, 0, W, 18, C_FG);
@@ -107,6 +112,7 @@ static void rodape(const char* esquerda, const char* direita) {
     g().print(direita);
   }
   g().setTextColor(C_FG, C_BG);
+  flush();  // double-buffer: envia o quadro inteiro de uma vez (sem piscar)
 }
 
 // ---- Icones vetoriais ------------------------------------------------
@@ -236,16 +242,103 @@ static void desenhaIcone(int idx, int x, int y, int cw, int ch, bool sel) {
   g().setTextColor(C_FG, C_BG);
 }
 
-// ---- Tela: menu principal -------------------------------------------
+// Desenha um icone grande (60px) centralizado em (cx, cy)
+static void iconeGrande(int idx, int cx, int cy) {
+  if (idx == 0) {  // WIFI
+    for (int r = 36; r >= 12; r -= 10) {
+      g().drawArc(cx, cy + 18, r, r - 3, 220, 320, C_FG);
+    }
+    g().fillCircle(cx, cy + 18, 5, C_FG);
+  } else if (idx == 1) {  // STATUS
+    int bw = 64, bh = 40;
+    int bx = cx - bw / 2, by = cy - bh / 2;
+    g().drawRect(bx, by, bw, bh, C_FG);
+    g().drawRect(bx + 1, by + 1, bw - 2, bh - 2, C_FG);
+    int wy = cy + 4;
+    for (int i = 0; i < 58; i += 6) {
+      g().drawLine(bx + 3 + i, wy, bx + 3 + i + 3, wy - 10, C_FG);
+      g().drawLine(bx + 3 + i + 3, wy - 10, bx + 3 + i + 6, wy + 8, C_FG);
+    }
+  } else if (idx == 2) {  // AJUSTES (engrenagem)
+    g().fillCircle(cx, cy, 22, C_FG);
+    g().fillCircle(cx, cy, 10, C_BG);
+    for (int a = 0; a < 360; a += 45) {
+      float rad = a * 3.14159f / 180.0f;
+      int x1 = cx + cos(rad) * 20, y1 = cy + sin(rad) * 20;
+      int x2 = cx + cos(rad) * 30, y2 = cy + sin(rad) * 30;
+      g().fillCircle(x2, y2, 5, C_FG);
+      (void)x1; (void)y1;
+    }
+    g().fillCircle(cx, cy, 10, C_BG);
+    g().drawCircle(cx, cy, 10, C_FG);
+  } else if (idx == 3) {  // MODBUS
+    g().setFont(&fonts::Font7);
+    g().setTextColor(C_FG, C_BG);
+    const char* t = "01";
+    int tw = g().textWidth(t);
+    g().setCursor(cx - tw / 2, cy - 24);
+    g().print(t);
+    g().setFont(&fonts::Font2);
+  } else if (idx == 4) {  // LOG
+    int bw = 68, bh = 50;
+    int bx = cx - bw / 2, by = cy - bh / 2;
+    g().drawRect(bx, by, bw, bh, C_FG);
+    g().drawRect(bx + 1, by + 1, bw - 2, bh - 2, C_FG);
+    for (int i = 0; i < 5; i++) {
+      g().drawLine(bx + 6, by + 8 + i * 8, bx + bw - 6, by + 8 + i * 8, C_FG);
+      g().drawLine(bx + 6, by + 9 + i * 8, bx + bw - 6, by + 9 + i * 8, C_FG);
+    }
+  } else if (idx == 5) {  // SOBRE (i no circulo)
+    g().fillCircle(cx, cy, 26, C_FG);
+    g().fillCircle(cx, cy, 23, C_BG);
+    g().setFont(&fonts::Font7);
+    g().setTextColor(C_FG, C_BG);
+    const char* t = "i";
+    int tw = g().textWidth(t);
+    g().setCursor(cx - tw / 2, cy - 24);
+    g().print(t);
+    g().setFont(&fonts::Font2);
+  }
+}
+
+// ---- Tela: menu principal (1 icone por vez) -------------------------
 static void desenhaMenu() {
   limpa();
   titulo("StamPLC Manut");
-  int cw = W / 3, ch = (H - 18 - 12) / 2;
-  for (int i = 0; i < MENU_N; i++) {
-    int col = i % 3, row = i / 3;
-    desenhaIcone(i, col * cw, 18 + row * ch, cw, ch, i == menuSel);
-  }
-  rodape(", . navega  Enter", "selecionar");
+
+  // Contador "N de 6" no canto direito do topo (sobre o status WiFi) nao, poe centrado
+  g().setFont(&fonts::Font2);
+  g().setTextColor(C_MUT, C_BG);
+  char cnt[12]; snprintf(cnt, sizeof cnt, "%d / %d", menuSel + 1, MENU_N);
+  int cw = g().textWidth(cnt);
+  g().setCursor((W - cw) / 2, 22);
+  g().print(cnt);
+  g().setTextColor(C_FG, C_BG);
+
+  // Icone grande centralizado
+  int cx = W / 2, cy = 70;
+  iconeGrande(menuSel, cx, cy);
+
+  // Rotulo bem grande embaixo
+  g().setFont(&fonts::Font4);
+  const char* rot = MENU[menuSel].rotulo;
+  int rw = g().textWidth(rot);
+  g().setCursor((W - rw) / 2, 108);
+  g().print(rot);
+  g().setFont(&fonts::Font2);
+
+  // Setas laterais indicando navegacao
+  g().setTextColor(C_MUT, C_BG);
+  g().setFont(&fonts::Font4);
+  g().setCursor(4, 60);
+  g().print("<");
+  int ww = g().textWidth(">");
+  g().setCursor(W - ww - 4, 60);
+  g().print(">");
+  g().setFont(&fonts::Font2);
+  g().setTextColor(C_FG, C_BG);
+
+  rodape("< > navega  Enter", "entrar");
 }
 
 // ---- HTTP helpers ----------------------------------------------------
@@ -310,6 +403,7 @@ static void acaoWifiConectar() {
   WiFi.begin(ssid.c_str(), senha.c_str());
   unsigned long t0 = millis();
   int dots = 0;
+  flush();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) {
     delay(300);
     g().setCursor(6 + 80 + dots * 6, 46);
@@ -318,6 +412,7 @@ static void acaoWifiConectar() {
     if (dots == 0) {
       g().fillRect(80, 46, 60, 16, C_BG);
     }
+    flush();
   }
   if (WiFi.status() == WL_CONNECTED) {
     wifiOn = true;
@@ -729,10 +824,16 @@ static unsigned long tTick = 0;
 void setup() {
   auto cfg = M5.config();
   M5Cardputer.begin(cfg, true);
-  g().setRotation(1);
-  g().fillScreen(C_BG);
-  g().setTextColor(C_FG, C_BG);
-  g().setFont(&fonts::Font2);
+  M5Cardputer.Display.setRotation(1);
+  M5Cardputer.Display.fillScreen(C_BG);
+
+  // Sprite 240x135 em 16bpp (~65 KB RAM). Precisa pedir PSRAM? S3 tem 320 KB
+  // SRAM, nao precisa. createSprite usa heap do SRAM.
+  canvas.setColorDepth(16);
+  canvas.createSprite(W, H);
+  canvas.fillScreen(C_BG);
+  canvas.setTextColor(C_FG, C_BG);
+  canvas.setFont(&fonts::Font2);
 
   prefs.begin("manut", false);
   ssid = prefs.getString("ssid", AP_SSID_PADRAO);
@@ -756,10 +857,8 @@ void loop() {
   // ---- Processa input por tela ----
   switch (tela) {
     case T_MENU: {
-      if (t.left)  { menuSel = (menuSel + MENU_N - 1) % MENU_N; desenhaMenu(); }
-      if (t.right) { menuSel = (menuSel + 1) % MENU_N; desenhaMenu(); }
-      if (t.up && menuSel >= 3) { menuSel -= 3; desenhaMenu(); }
-      if (t.down && menuSel < 3) { menuSel += 3; desenhaMenu(); }
+      if (t.left || t.up)   { menuSel = (menuSel + MENU_N - 1) % MENU_N; desenhaMenu(); }
+      if (t.right || t.down) { menuSel = (menuSel + 1) % MENU_N; desenhaMenu(); }
       if (t.enter) {
         listSel = 0; listOff = 0; msgErro = "";
         if (menuSel == 0) { tela = T_WIFI; desenhaWifi(); }
