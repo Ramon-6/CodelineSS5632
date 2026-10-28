@@ -68,9 +68,15 @@ static void manutencaoBegin() { apAtivo = false; }
 static void manutencaoLigaAP() {
   if (apAtivo) return;
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(MANUTENCAO_AP_SSID, MANUTENCAO_AP_SENHA, 6, 0, 2);
+  // Desliga power save do radio: sem isso o AP cai periodicamente e o celular
+  // perde conexao a cada 1-2 min. Com NONE o AP fica estavel.
+  WiFi.setSleep(WIFI_PS_NONE);
+  // max_connection = 4 (padrao do ESP32 ja e 4, mas deixo explicito)
+  WiFi.softAP(MANUTENCAO_AP_SSID, MANUTENCAO_AP_SENHA, 6, 0, 4);
   IPAddress apIp(192, 168, 4, 1), apMask(255, 255, 255, 0);
   WiFi.softAPConfig(apIp, apIp, apMask);
+  // Potencia maxima no radio pra garantir sinal em painel metalico
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
   webAP.begin();
   apAtivo = true;
   apUltimoCliente = millis();
@@ -88,6 +94,9 @@ inline bool manutencaoAPAtivo() { return apAtivo; }
 
 static void manutencaoLoop() {
   if (!apAtivo) return;
+  // Enquanto houver pelo menos 1 celular/cardputer conectado no AP, reseta
+  // o contador - timeout so corre quando ninguem esta usando.
+  if (WiFi.softAPgetStationNum() > 0) apUltimoCliente = millis();
   if (millis() - apUltimoCliente > MANUTENCAO_AP_TIMEOUT_MS) manutencaoDesligaAP();
 }
 
