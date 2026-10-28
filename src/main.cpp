@@ -541,6 +541,55 @@ void groveSetModo(bool manual) {
 uint32_t groveEncoder() { return ultimoSnap.contador; }
 const char* groveFaseNome() { return nomeFaseAtual(); }
 
+// ---- Ajustes rapidos pelo /manut (nao reiniciam o PLC) ----------------
+bool manutAjustaTempo(uint32_t ms) {
+  if (ms < 60000 || ms > 36000000UL) return false;
+  esteiraSegMs = ms; prefs.putUInt("etempo", ms); return true;
+}
+bool manutAjustaMixA(uint32_t ms) {
+  if (ms < 60000 || ms > 36000000UL) return false;
+  tempoMixAMs = ms; prefs.putUInt("mixa", ms); return true;
+}
+bool manutAjustaMixB(uint32_t ms) {
+  if (ms < 60000 || ms > 36000000UL) return false;
+  tempoMixBMs = ms; prefs.putUInt("mixb", ms); return true;
+}
+bool manutAjustaEspera(uint32_t ms) {
+  if (ms < 10000 || ms > 3600000UL) return false;
+  esperaRetomarMs = ms; prefs.putUInt("esper", ms); return true;
+}
+void manutAjustaModo(bool manual) { groveSetModo(manual); }
+void manutAjustaSireneHab(bool on) {
+  sireneHabilitada = on; prefs.putBool("sirH", on);
+}
+bool manutAjustaSirHorarios(const char* s) {
+  if (!s || strlen(s) < 5 || strlen(s) > 24) return false;
+  prefs.putString("sirHor", s);
+  sireneParseia(s);
+  return true;
+}
+void manutAjustaEncF(bool on) {
+  encoderFimHabilitado = on; prefs.putBool("encF", on);
+}
+void manutTestar() { if (fase == OCIOSO) disparar("manut", "TESTE-MANUT"); }
+void manutParar() { pararTudo(); }
+
+// ---- Modbus explorer (reusa funcoes internas) -------------------------
+bool mbManutLeRegs(uint8_t fc, uint16_t addr, uint16_t qty, uint16_t* out) {
+  if (qty < 1 || qty > 125) return false;
+  return lerRegs(fc, addr, qty, out);
+}
+bool mbManutLeBits(uint8_t fc, uint16_t addr, uint16_t qty, bool* out) {
+  if (qty < 1 || qty > 256) return false;
+  return lerBits(fc, addr, qty, out);
+}
+bool mbManutEscreveBit(uint16_t addr, bool on) { return escreverBobina(addr, on); }
+bool mbManutEscreveReg(uint16_t addr, uint16_t v) {
+  uint8_t pdu[5] = {0x06, uint8_t(addr >> 8), uint8_t(addr), uint8_t(v >> 8), uint8_t(v)};
+  uint8_t r[16]; size_t rl;
+  return mbTransacao(pdu, 5, r, rl);
+}
+
 // ---- Maquina de estados -------------------------------------------------
 // Chamado quando um codigo foi lido pela impressora (ou botao de teste)
 static void disparar(const char* motivo, const char* codigo) {

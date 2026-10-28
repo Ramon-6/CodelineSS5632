@@ -77,6 +77,71 @@ num loop e mostrar numa tela sua propria. Formato:
 ### `http://192.168.4.1/log.txt`
 Texto puro com as ultimas 40 linhas do log.
 
+### `http://192.168.4.1/set?CHAVE=valor`
+Muda **um** parametro em runtime (sem reboot). Devolve JSON `{ok,msg}`.
+Esses mesmos campos aparecem como formularios no `/manut`.
+
+| Chave | Valor | Exemplo |
+|---|---|---|
+| `tempo` | tempo padrao em segundos (60..36000) | `/set?tempo=300` |
+| `mixa` | tempo do MIX A em segundos | `/set?mixa=240` |
+| `mixb` | tempo do MIX B em segundos | `/set?mixb=480` |
+| `espera` | espera do operador em segundos (10..3600) | `/set?espera=60` |
+| `modo` | `auto` ou `manual` | `/set?modo=manual` |
+| `sirene` | `0` ou `1` | `/set?sirene=1` |
+| `sirHor` | horarios HH:MM separados por vírgula | `/set?sirHor=07:00,16:00,00:00` |
+| `encF` | encoder fim habilitado `0`/`1` | `/set?encF=1` |
+| `acao` | `testar` ou `parar` | `/set?acao=testar` |
+
+Tudo persiste no NVS (preferences) e aguenta reboot.
+
+### `http://192.168.4.1/mb?fc=X&a=Y&n=N`
+Modbus explorer — o PLC le ou escreve o endereco pedido na impressora
+e devolve JSON. Util pra investigar bugs na hora.
+
+**Leituras** (`fc` 1..4):
+
+| `fc` | O que le | Exemplo |
+|---|---|---|
+| 3 | holding register (fc=03) | `/mb?fc=3&a=200&n=1` le `4x0201` |
+| 4 | input register (fc=04) | `/mb?fc=4&a=0&n=4` |
+| 1 | coil (fc=01) | `/mb?fc=1&a=0&n=16` |
+| 2 | discrete input (fc=02) | `/mb?fc=2&a=17&n=1` le tampa |
+
+- `a` = endereço no fio (0-based, segue o manual: `4x0201` vira `a=200`)
+- `n` = quantos ler. Max **32 regs** ou **256 bits** por chamada
+- Resposta de registers inclui `dec` (decimal), `hex` (hexa) e `ascii`
+  (interpretando os bytes como texto — util pra `4x0201` que e o codigo
+  do scanner)
+
+Exemplo real lendo o codigo do scanner:
+
+```
+GET /mb?fc=3&a=200&n=25
+→ {"ok":true,"fc":3,"addr":200,"n":25,
+   "hex":["0x3233","0x2E30","0x3130",...],
+   "dec":[12851,11824,...],
+   "ascii":"23.010.3062 MIX A       "}
+```
+
+**Escritas** (`fc` 5 ou 6):
+
+| `fc` | O que escreve | Exemplo |
+|---|---|---|
+| 5 | 1 coil (fc=05) | `/mb?fc=5&a=2&v=1` liga a bobina clear |
+| 6 | 1 holding (fc=06) | `/mb?fc=6&a=201&v=0` zera `4x0202` |
+
+- `v` = valor (0/1 pra coil, 0..65535 pra holding)
+- **Cuidado**: escrever em registros errados pode confundir a impressora
+  ou disparar um ciclo. Verifique com `/mb?fc=3&a=...` antes.
+
+### Painel completo integrado
+No topo do `/manut` HTML tem campos editáveis pra todos os tempos
+(padrao, MIX A, MIX B, espera), modo auto/manual, sirene on/off +
+horarios, encoder fim. Botao "Aplicar" chama `/set?...` por tras.
+Debaixo tem o explorer Modbus com dropdown de função + campo endereco
++ campo N/valor.
+
 ### `http://192.168.4.1/update`
 **Atualizar firmware via OTA.** Pagina com formulario que recebe o
 `firmware.bin` gerado pelo PlatformIO (`.pio/build/stamplc/firmware.bin`)
