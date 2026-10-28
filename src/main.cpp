@@ -66,11 +66,18 @@ static uint16_t tid = 0;
 // Envia o PDU (fc + dados) e devolve a resposta (fc + dados). false se falhar.
 // Cliente Modbus persistente - mantem conexao aberta entre transacoes
 static EthernetClient mb;
+// Timeouts curtos (total pior caso: ~2s por chamada falha). Impressora
+// local em LAN direta responde em ~5-20 ms; 2s de teto evita que o loop
+// trave visivelmente quando a impressora cair, mantendo botoes, tela,
+// AP e sirene responsivos.
+#define MB_CONNECT_TIMEOUT_MS  800
+#define MB_HEADER_TIMEOUT_MS   600
+#define MB_DATA_TIMEOUT_MS     800
+
 static bool mbTransacao(const uint8_t* pdu, size_t n, uint8_t* resp, size_t& rlen) {
-  // reconecta se cair
   if (!mb.connected()) {
     mb.stop();
-    mb.setConnectionTimeout(1500);
+    mb.setConnectionTimeout(MB_CONNECT_TIMEOUT_MS);
     if (!mb.connect(ipImpressora, IMPRESSORA_PORTA)) {
       return false;
     }
@@ -84,18 +91,20 @@ static bool mbTransacao(const uint8_t* pdu, size_t n, uint8_t* resp, size_t& rle
   uint8_t h[7];
   size_t got = 0;
   while (got < 7) {
-    if (millis() - t0 > 1500) { mb.stop(); return false; }
+    if (millis() - t0 > MB_HEADER_TIMEOUT_MS) { mb.stop(); return false; }
     if (mb.available()) h[got++] = mb.read();
+    else delay(0);  // cede o CPU; evita busy-wait segurando o core
   }
   size_t len = (h[4] << 8 | h[5]) - 1;
   if (len < 1 || len > 250) { mb.stop(); return false; }
   got = 0;
+  unsigned long tData = millis();
   while (got < len) {
-    if (millis() - t0 > 2000) { mb.stop(); return false; }
+    if (millis() - tData > MB_DATA_TIMEOUT_MS) { mb.stop(); return false; }
     if (mb.available()) resp[got++] = mb.read();
+    else delay(0);
   }
   rlen = len;
-  // NAO fecha - mantem conexao aberta para proximas transacoes
   if (resp[0] & 0x80) return false;
   return true;
 }
@@ -605,6 +614,10 @@ void manutAjustaEncF(bool on) {
 void manutTestar() { if (fase == OCIOSO) disparar("manut", "TESTE-MANUT"); }
 void manutParar() { pararTudo(); }
 
+// OTA so e permitida com a maquina em OCIOSO e sem sirene ativa, pra
+// nao travar o controle da esteira no meio de um ciclo.
+bool otaPermitido() { return fase == OCIOSO && !sireneAtiva; }
+
 // ---- Modbus explorer (reusa funcoes internas) -------------------------
 bool mbManutLeRegs(uint8_t fc, uint16_t addr, uint16_t qty, uint16_t* out) {
   if (qty < 1 || qty > 125) return false;
@@ -793,6 +806,9 @@ static void processaModoManual() {
 // (protege contra operador que so encosta no fim de curso).
 static void processaSirene() {
   if (!sireneHabilitada || !horaOk) return;
+  // Durante o grace de boot, nao mexe no scanner da impressora - ela pode
+  // estar reinicializando e qualquer escrita cedo pode confundir o firmware
+  if (millis() - tBoot < BOOT_GRACE_MS) return;
   time_t n = time(nullptr);
   struct tm t;
   localtime_r(&n, &t);

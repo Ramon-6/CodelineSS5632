@@ -287,10 +287,19 @@ static void rotaUpdateGET(Client& c) {
   ));
 }
 
+// Hook pra o main sinalizar se e seguro atualizar (so em OCIOSO).
+inline bool otaPermitido();
+
 static void rotaUpdatePOST(Client& c, uint32_t contentLen) {
   if (contentLen == 0 || contentLen > 4UL * 1024UL * 1024UL) {
     c.print("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
             "Content-Length ausente ou invalido\n");
+    return;
+  }
+  if (!otaPermitido()) {
+    c.print("HTTP/1.1 409 Conflict\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n"
+            "Nao e seguro atualizar durante um ciclo em andamento.\n"
+            "Espere o ciclo terminar (fase OCIOSO) e tente de novo.\n");
     return;
   }
   if (!Update.begin(contentLen)) {

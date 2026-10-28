@@ -43,7 +43,7 @@
 // Depois do boot, ignora qualquer disparo por este tempo. Resolve "StamPLC desliga
 // e liga -> ja inicia ciclo" (codigo residual na impressora era interpretado como
 // leitura nova).
-#define BOOT_GRACE_MS       5000
+#define BOOT_GRACE_MS       10000       // 10s - dar tempo pra scanner USB e Modbus estabilizar
 // E ao conectar na impressora, apaga qualquer codigo residual (manda 0x33). Deixe
 // em 0 se tiver medo de perder um codigo valido logo apos reset.
 #define APAGA_AO_CONECTAR   1
@@ -90,7 +90,7 @@
 // Botao A segurado 3s em qualquer pagina do PLC sobe um Access Point WiFi
 // para o Cardputer/celular acessar o painel + atualizar firmware sem notebook.
 // NAO INTERFERE no Ethernet que fala com a impressora (hardware separado).
-#define MANUTENCAO_AP_SSID       "batoff"
+#define MANUTENCAO_AP_SSID       "Batoff"
 #define MANUTENCAO_AP_SENHA      "batoff1234"      // minimo 8 chars
 #define MANUTENCAO_AP_TIMEOUT_MS 1800000UL         // 30 min sem cliente -> desliga
 
